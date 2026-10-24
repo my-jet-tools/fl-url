@@ -17,7 +17,7 @@ This page is everything an ordinary request needs: installation, building and se
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Known IP, no DNS**: `https://domain.com@15.0.0.5/path` connects to the ip while the Host header and TLS SNI stay `domain.com` (native only) — see [Connecting to a Known IP](known-ip.md)
 - **Retry Logic**: `with_retries(n)` replays a request that got no response; `with_retry(delay, n)` also replays a 5xx, `delay` apart, to ride out a restart of the service — see [Retry Logic](retries.md)
-- **Request Compression**: `compress()` gzips a request body of 64 bytes and up
+- **Request Compression**: `compress()` gzips a request body of 64 bytes and up; `compress_with_level(CompressionLevel::Fast | Default | Best)` picks how hard
 - **Response Body Reader**: `get_body()` gives the body as a reader — read it piece by piece, or as a whole within a size limit, as bytes, a string or JSON — native and wasm
 - **Passing a Response On**: `into_hyper_response()` hands the response on with its body still streaming (native only)
 - **Streaming Request Bodies**: Send a body of any size at constant memory, framed with `Content-Length` or chunked (native only) — see [Streamed Body](streamed-body.md)
@@ -690,5 +690,5 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
 | [`known-ip`](known-ip.md) | `https://name@ip/path`: connect to a known ip without DNS while the Host header, SNI and certificate check stay on the name (native only) |
 | [`timeouts-and-limits`](timeouts-and-limits.md) | `set_timeout`, `set_response_body_timeout`, what each of them bounds, and how a response body is held to a size limit |
 | [`retries`](retries.md) | `with_retries(n)` vs `with_retry(delay, n)`: which outcomes are replayed, idempotent methods only, what the last attempt returns, how long it can take |
-| [`compression`](compression.md) | `compress()` of a request body and `accept_gzip()` for the response |
+| [`compression`](compression.md) | `compress()` / `compress_with_level()` of a request body and `accept_gzip()` for the response |
 | [`debugging`](debugging.md) | `print_input_request()` and the `*_with_debug` twin of every request method |

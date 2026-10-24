@@ -53,7 +53,7 @@ These **do** work under wasm: `set_timeout` bounds the request→headers round-t
 via `AbortController` + `setTimeout`; `set_response_body_timeout` bounds the body
 read on the same signal; `with_retries` and `with_retry` replay idempotent methods
 only, with the same semantics as on native (the `with_retry` pause is a
-`setTimeout`-driven future); `compress` gzips the request body.
+`setTimeout`-driven future); `compress` and `compress_with_level` gzip the request body.
 
 One difference in the timeouts: natively `set_timeout` covers a read of the whole body
 as well (`into_vec`, `into_string`, `into_json`), under wasm it ends with the response

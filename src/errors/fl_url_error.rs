@@ -32,9 +32,10 @@ pub enum FlUrlError {
     /// client certificate was given for a url that is not `https://`.
     RequestBuild(String),
 
-    /// `.compress()` was combined with a streamed request body. Gzipping needs the
-    /// whole body in one buffer, which is exactly what streaming exists to avoid, so
-    /// the request is refused instead of quietly materializing the payload.
+    /// `.compress()` or `.compress_with_level()` was combined with a streamed request
+    /// body. Gzipping needs the whole body in one buffer, which is exactly what
+    /// streaming exists to avoid, so the request is refused instead of quietly
+    /// materializing the payload.
     #[cfg(not(target_arch = "wasm32"))]
     StreamedBodyCanNotBeCompressed,
 

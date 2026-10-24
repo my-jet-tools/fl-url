@@ -10,9 +10,32 @@ let response = FlUrl::new("https://api.example.com/data")
     .await?;
 ```
 
+## Compression Level
+
+`compress()` compresses at gzip's default level. `compress_with_level` takes the level
+as a `CompressionLevel`:
+
+```rust
+use flurl::{CompressionLevel, FlUrl};
+
+let response = FlUrl::new("https://api.example.com/data")
+    .compress_with_level(CompressionLevel::Best)
+    .post(body)
+    .await?;
+```
+
+| `CompressionLevel` | gzip level | what for |
+| --- | --- | --- |
+| `Fast` | 1 | the least CPU time, the least gain — a big body sent often |
+| `Default` | 6 | the balance; what `compress()` uses |
+| `Best` | 9 | the smallest body, the most CPU time — a slow or metered link |
+
+The later of `compress()` and `compress_with_level` wins. The level means the same on
+native and under wasm.
+
 ## Body Compression
 
-- `compress()` is only applied if the body size is >= 64 bytes; a shorter body goes out as it is
+- `compress()` and `compress_with_level` are only applied if the body size is >= 64 bytes; a shorter body goes out as it is
 - Uses gzip compression
 - Sets the `Content-Encoding: gzip` header, unless the request already carries a `Content-Encoding`
 - Compression threshold can be adjusted by modifying the source code

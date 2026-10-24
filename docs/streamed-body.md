@@ -83,7 +83,7 @@ it — a body of unknown size must not claim a length it may not deliver.
 
 | knob | what happens |
 | --- | --- |
-| `compress()` | `FlUrlError::StreamedBodyCanNotBeCompressed` — gzip needs the whole body in one buffer, which is exactly what streaming avoids |
+| `compress()`, `compress_with_level(..)` | `FlUrlError::StreamedBodyCanNotBeCompressed` — gzip needs the whole body in one buffer, which is exactly what streaming avoids |
 | `with_retries(n)`, `with_retry(d, n)` | ignored: the payload is consumed as it is sent, so the request is attempted **exactly once**. Rebuilding the stream and calling again is the caller's decision — it owns the source data |
 | `set_timeout(d)` | now covers the **whole** call, upload included, not just the wait for the response head. The 10s default is far too short for a real upload |
 | `update_mode(..)` | ignored: the mode is pinned to `Http1Hyper`, since the own HTTP/1.1 implementation serializes a request into one buffer and the h2 client has no streaming entry point |

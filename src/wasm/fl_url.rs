@@ -7,7 +7,7 @@ use rust_extensions::StrOrString;
 use super::fl_url_inner::FlUrlInner;
 use crate::body::HttpRequestBody;
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlResponse};
-use crate::FlUrlError;
+use crate::{CompressionLevel, FlUrlError};
 
 /// Kept for API parity with the native backend. Under wasm the browser negotiates
 /// the HTTP version, so the mode is stored but otherwise ignored.
@@ -88,8 +88,17 @@ impl FlUrl {
         self.inner.as_ref().map(|inner| &inner.url_builder)
     }
 
+    /// Gzips a request body of 64 bytes and up at [`CompressionLevel::Default`] and
+    /// sends it with `Content-Encoding: gzip`. A shorter body goes out as it is.
     pub fn compress(self) -> Self {
         self.map(|inner| inner.compress())
+    }
+
+    /// [`Self::compress`] at the level given: [`CompressionLevel::Fast`] spends the
+    /// least time on the body, [`CompressionLevel::Best`] makes it the smallest. The
+    /// later of the two calls wins.
+    pub fn compress_with_level(self, level: CompressionLevel) -> Self {
+        self.map(|inner| inner.compress_with_level(level))
     }
 
     /// No-op under wasm: the browser negotiates `Accept-Encoding` and

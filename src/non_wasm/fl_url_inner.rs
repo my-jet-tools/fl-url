@@ -13,7 +13,6 @@ use my_tls::tokio_rustls::client::TlsStream;
 use rust_extensions::remote_endpoint::Scheme;
 use rust_extensions::StrOrString;
 
-use std::io::Write;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +28,7 @@ use crate::non_wasm::resolved_ip::extract_resolved_ip;
 
 use crate::non_wasm::http_clients_cache::*;
 
+use crate::CompressionLevel;
 use crate::HttpConnectionResolver;
 
 use crate::FlUrlError;
@@ -58,7 +58,8 @@ pub(crate) struct FlUrlInner {
     pub response_body_timeout: Option<Duration>,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
-    pub compress_body: bool,
+    // `Some` once `compress`/`compress_with_level` asked for the body to be gzipped.
+    pub compress_body: Option<CompressionLevel>,
     pub decompress_gzip_response: bool,
     pub print_input_request: bool,
     // If we reuse connection and it has not been used more seconds than this parameter - it disposed
@@ -152,7 +153,7 @@ impl FlUrlInner {
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
             print_input_request: false,
-            compress_body: false,
+            compress_body: None,
             decompress_gzip_response: false,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_credentials: credentials,
@@ -174,8 +175,12 @@ impl FlUrlInner {
         self.resolved_ip
     }
 
-    pub fn compress(mut self) -> Self {
-        self.compress_body = true;
+    pub fn compress(self) -> Self {
+        self.compress_with_level(CompressionLevel::Default)
+    }
+
+    pub fn compress_with_level(mut self, level: CompressionLevel) -> Self {
+        self.compress_body = Some(level);
         self
     }
 
@@ -700,9 +705,11 @@ impl FlUrlInner {
         }
     }
 
-    fn compress_body(&mut self, body: Vec<u8>) -> Result<Vec<u8>, FlUrlError> {
-        use flate2::{write::GzEncoder, Compression};
-
+    fn compress_body(
+        &mut self,
+        body: Vec<u8>,
+        level: CompressionLevel,
+    ) -> Result<Vec<u8>, FlUrlError> {
         if body.len() < 64 {
             return Ok(body);
         }
@@ -711,11 +718,7 @@ impl FlUrlInner {
             self.headers.add("Content-Encoding", "gzip");
         }
 
-        // The encoder writes into a Vec, which does not fail; the io::Result is only
-        // the shape of its api.
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(body.as_slice())?;
-        Ok(encoder.finish()?)
+        crate::compression::gzip(&body, level)
     }
 
     fn get_path_and_query_with_leading_slash(&self) -> String {
@@ -770,8 +773,8 @@ impl FlUrlInner {
             self.compile_debug_info_with_body(debug, method.as_str(), &body);
         }
 
-        if self.compress_body {
-            body = self.compress_body(body)?;
+        if let Some(level) = self.compress_body {
+            body = self.compress_body(body, level)?;
         }
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
@@ -875,8 +878,8 @@ impl FlUrlInner {
             self.compile_debug_info_with_body(debug, method.as_str(), &body);
         }
 
-        if self.compress_body {
-            body = self.compress_body(body)?;
+        if let Some(level) = self.compress_body {
+            body = self.compress_body(body, level)?;
         }
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
@@ -1095,7 +1098,7 @@ impl FlUrlInner {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        if self.compress_body {
+        if self.compress_body.is_some() {
             return Err(FlUrlError::StreamedBodyCanNotBeCompressed);
         }
 

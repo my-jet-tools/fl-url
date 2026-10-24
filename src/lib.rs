@@ -19,12 +19,14 @@
 //! crate root, so `flurl::FlUrl` resolves to whichever backend is active and
 //! call sites need no `cfg` of their own.
 //!
-//! The shared, transport-agnostic pieces — [`enum@FlUrlError`] and the request
-//! [`body`] types — live at the crate root and are used by both backends.
+//! The shared, transport-agnostic pieces — [`enum@FlUrlError`], the request
+//! [`body`] types and [`CompressionLevel`] — live at the crate root and are used
+//! by both backends.
 
 // ---- Shared, target-agnostic modules ---------------------------------------
 
 pub mod body;
+mod compression;
 mod empty_request_model;
 mod errors;
 #[cfg(not(target_arch = "wasm32"))]
@@ -32,6 +34,7 @@ mod fl_drop_connection_scenario;
 mod host_check;
 mod retry_policy;
 
+pub use compression::CompressionLevel;
 pub use empty_request_model::*;
 pub use errors::*;
 pub(crate) use retry_policy::RetryPolicy;

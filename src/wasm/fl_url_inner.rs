@@ -8,7 +8,7 @@ use my_http_utils::UrlBuilder;
 use crate::body::HttpRequestBody;
 use crate::wasm::fetch::{build_request, execute_fetch, get_origin, sleep};
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlMode, FlUrlResponse, HttpVerb};
-use crate::{FlUrlError, FlUrlHeaders, RetryPolicy};
+use crate::{CompressionLevel, FlUrlError, FlUrlHeaders, RetryPolicy};
 
 /// Everything a request is made of, and everything that is done with it. [`FlUrl`]
 /// keeps one of these — or the first error that came up while it was being built —
@@ -23,7 +23,8 @@ pub(crate) struct FlUrlInner {
     pub response_body_timeout: Option<Duration>,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
-    pub compress_body: bool,
+    // `Some` once `compress`/`compress_with_level` asked for the body to be gzipped.
+    pub compress_body: Option<CompressionLevel>,
     pub print_input_request: bool,
     pub reuse_connection_timeout_sec: i64,
     mode: FlUrlMode,
@@ -70,7 +71,7 @@ impl FlUrlInner {
             response_body_timeout: None,
             do_not_reuse_connection: false,
             connections_cache: None,
-            compress_body: false,
+            compress_body: None,
             print_input_request: false,
             reuse_connection_timeout_sec: 120,
             mode: Default::default(),
@@ -78,8 +79,12 @@ impl FlUrlInner {
         })
     }
 
-    pub fn compress(mut self) -> Self {
-        self.compress_body = true;
+    pub fn compress(self) -> Self {
+        self.compress_with_level(CompressionLevel::Default)
+    }
+
+    pub fn compress_with_level(mut self, level: CompressionLevel) -> Self {
+        self.compress_body = Some(level);
         self
     }
 
@@ -478,17 +483,18 @@ impl FlUrlInner {
             self.fill_debug(debug, method, &bytes);
         }
 
-        if self.compress_body {
-            bytes = self.compress_body(bytes)?;
+        if let Some(level) = self.compress_body {
+            bytes = self.compress_body(bytes, level)?;
         }
 
         Ok(bytes)
     }
 
-    fn compress_body(&mut self, body: Vec<u8>) -> Result<Vec<u8>, FlUrlError> {
-        use flate2::{write::GzEncoder, Compression};
-        use std::io::Write;
-
+    fn compress_body(
+        &mut self,
+        body: Vec<u8>,
+        level: CompressionLevel,
+    ) -> Result<Vec<u8>, FlUrlError> {
         if body.len() < 64 {
             return Ok(body);
         }
@@ -497,11 +503,7 @@ impl FlUrlInner {
             self.headers.add("Content-Encoding", "gzip");
         }
 
-        // The encoder writes into a Vec, which does not fail; the io::Result is only
-        // the shape of its api.
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(body.as_slice())?;
-        Ok(encoder.finish()?)
+        crate::compression::gzip(&body, level)
     }
 
     fn fill_debug(&self, out: &mut String, method: &str, body: &[u8]) {

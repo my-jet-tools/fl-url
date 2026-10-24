@@ -12,6 +12,7 @@ use my_http_utils::UrlBuilder;
 use super::fl_url_inner::FlUrlInner;
 use super::FlUrlResponse;
 use crate::body::HttpRequestBody;
+use crate::CompressionLevel;
 use crate::FlUrlError;
 use crate::FlUrlHttpConnectionsCache;
 
@@ -130,8 +131,17 @@ impl FlUrl {
         self.inner.as_ref().ok()?.get_resolved_ip()
     }
 
+    /// Gzips a request body of 64 bytes and up at [`CompressionLevel::Default`] and
+    /// sends it with `Content-Encoding: gzip`. A shorter body goes out as it is.
     pub fn compress(self) -> Self {
         self.map(|inner| inner.compress())
+    }
+
+    /// [`Self::compress`] at the level given: [`CompressionLevel::Fast`] spends the
+    /// least time on the body, [`CompressionLevel::Best`] makes it the smallest. The
+    /// later of the two calls wins.
+    pub fn compress_with_level(self, level: CompressionLevel) -> Self {
+        self.map(|inner| inner.compress_with_level(level))
     }
 
     /// Advertises gzip support to the server (`Accept-Encoding: gzip`) and
@@ -577,8 +587,9 @@ impl FlUrl {
     ///
     /// Three builder knobs do not apply, and none of them fails quietly:
     ///
-    /// * [`Self::compress`] gzips the body as one buffer, which is exactly what
-    ///   streaming avoids → [`FlUrlError::StreamedBodyCanNotBeCompressed`].
+    /// * [`Self::compress`] and [`Self::compress_with_level`] gzip the body as one
+    ///   buffer, which is exactly what streaming avoids →
+    ///   [`FlUrlError::StreamedBodyCanNotBeCompressed`].
     /// * [`Self::with_retries`] and [`Self::with_retry`] are ignored: the payload is
     ///   consumed as it is sent, so the request is attempted exactly once. Rebuilding
     ///   the stream and calling again is the caller's decision — it owns the source
