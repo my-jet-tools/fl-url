@@ -15,6 +15,8 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git" }
 
 `https://` needs a TLS provider feature — `with-ring-tls` or `with-rust-tls`; with neither, an `https://` request fails with `FlUrlError::UnsupportedScheme`. TLS is decided once for the whole application. The features and how to choose between them: [Installation](docs/index_resource.md#installation).
 
+Under `wasm32` `.compress()` comes only with the `with-wasm-compression` feature, so that a client which never compresses a request body does not carry flate2: it is decided at run time, and the linker can not drop it. The native backend always has it. See [Request Compression under wasm](docs/compression.md#request-compression-under-wasm).
+
 ```rust
 use flurl::FlUrl;
 
@@ -31,7 +33,7 @@ let users: Vec<User> = response.get_body()?.into_json(1024 * 1024).await?;
 
 The library is documented in [`docs/`](docs). [The basics](docs/index_resource.md) cover everything an ordinary request needs: installation and features, building and sending requests, url building, headers, request bodies, response handling, redirects and errors. Everything else is a topic of its own:
 
-- [**wasm**](docs/wasm.md) — the same API on `wasm32` over the browser `fetch`: what is a no-op there, what is native-only, root-relative urls.
+- [**wasm**](docs/wasm.md) — the same API on `wasm32` over the browser `fetch`: what is a no-op there, what is native-only, `with-wasm-compression`, root-relative urls.
 - [**streamed-body**](docs/streamed-body.md) — a request body of any size at constant memory, with `Content-Length` or chunked framing (native only).
 - [**model-driven-requests**](docs/model-driven-requests.md) — `execute_request` with a `MyHttpInput` model, and `EmptyRequestModel`.
 - [**connections**](docs/connections.md) — connection reuse and the pool, when a connection is dropped, HTTP/2 and HTTP/1.1 modes.
@@ -41,7 +43,7 @@ The library is documented in [`docs/`](docs). [The basics](docs/index_resource.m
 - [**known-ip**](docs/known-ip.md) — connect to a known ip without DNS, keeping the host name for `Host`, SNI and the certificate check.
 - [**timeouts-and-limits**](docs/timeouts-and-limits.md) — request and body timeouts, the size limit a response body is read with.
 - [**retries**](docs/retries.md) — `with_retries` and `with_retry`.
-- [**compression**](docs/compression.md) — gzip of a request body and of a response.
+- [**compression**](docs/compression.md) — gzip of a request body and of a response; under wasm a request body needs `with-wasm-compression`.
 - [**debugging**](docs/debugging.md) — printing a request and the `*_with_debug` methods.
 
 ## License

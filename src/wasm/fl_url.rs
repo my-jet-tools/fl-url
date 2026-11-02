@@ -7,7 +7,9 @@ use rust_extensions::StrOrString;
 use super::fl_url_inner::FlUrlInner;
 use crate::body::HttpRequestBody;
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlResponse};
-use crate::{CompressionLevel, FlUrlError};
+#[cfg(feature = "with-wasm-compression")]
+use crate::CompressionLevel;
+use crate::FlUrlError;
 
 /// Kept for API parity with the native backend. Under wasm the browser negotiates
 /// the HTTP version, so the mode is stored but otherwise ignored.
@@ -45,6 +47,8 @@ pub enum HttpVerb {
 /// backed by the browser `fetch`. Knobs that only make sense for the native
 /// transport (connection pool, TLS validation, HTTP mode, connection reuse) are
 /// stored for signature parity and otherwise ignored — the browser handles them.
+/// `compress` and `compress_with_level` are there only with the
+/// `with-wasm-compression` feature, which is what keeps flate2 out of a bundle.
 ///
 /// It is a plain builder — no step of it returns a `Result`. A url that can not be
 /// used becomes the state of the builder instead: every step after it is skipped, and
@@ -90,6 +94,7 @@ impl FlUrl {
 
     /// Gzips a request body of 64 bytes and up at [`CompressionLevel::Default`] and
     /// sends it with `Content-Encoding: gzip`. A shorter body goes out as it is.
+    #[cfg(feature = "with-wasm-compression")]
     pub fn compress(self) -> Self {
         self.map(|inner| inner.compress())
     }
@@ -97,6 +102,7 @@ impl FlUrl {
     /// [`Self::compress`] at the level given: [`CompressionLevel::Fast`] spends the
     /// least time on the body, [`CompressionLevel::Best`] makes it the smallest. The
     /// later of the two calls wins.
+    #[cfg(feature = "with-wasm-compression")]
     pub fn compress_with_level(self, level: CompressionLevel) -> Self {
         self.map(|inner| inner.compress_with_level(level))
     }

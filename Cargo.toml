@@ -41,6 +41,12 @@ with-rust-tls = ["_tls", "my-tls/with-rust-crypto-providers"]
 # even then only for callers that opt in per request.
 dangerous-tls = ["_tls", "my-tls/dangerous-tls"]
 
+# wasm only: compiles `.compress()` and flate2 into the bundle. The native backend always has both.
+# Whether a body is compressed is decided at run time, so the linker can not drop the
+# gzip code: without this switch every wasm client would carry flate2 and crc32fast,
+# called or not. Under wasm `.compress()` without it is a compile error.
+with-wasm-compression = ["dep:flate2"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -59,10 +65,6 @@ serde_json = { version = "*" }
 async-trait = "*"
 # A piece of a response body, as `FlUrlBodyReader::get_next` gives it on both backends.
 bytes = "*"
-# Pure-Rust backend so it compiles under wasm too (used by `.compress()`).
-flate2 = { version = "*", default-features = false, features = [
-    "rust_backend",
-] }
 
 # Native backend (`non_wasm`): hyper / tokio / TLS / connection pooling / ssh.
 # None of these compile to wasm, so they are excluded from the wasm build.
@@ -90,6 +92,9 @@ http = "*"
 parking_lot = "*"
 ahash = "*"
 lazy_static = "*"
+# `.compress()` and the decoding `accept_gzip()` asks for. The one dependency of this
+# table which does compile to wasm: there it is optional, see below.
+flate2 = { version = "*", default-features = false, features = ["rust_backend"] }
 
 # wasm backend (`wasm`): the browser fetch API via web-sys.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -112,6 +117,9 @@ web-sys = { version = "0.3", features = [
     "ReadableStreamDefaultReader",
     "console",
 ] }
+# Pure-Rust backend so it compiles under wasm. Only for `.compress()`, so only with
+# `with-wasm-compression`: a response is decoded by the browser.
+flate2 = { version = "*", default-features = false, features = ["rust_backend"], optional = true }
 
 # The streamed-body tests stand up a raw tokio TCP server and read the request off
 # the wire themselves, which needs more of tokio than the library does.

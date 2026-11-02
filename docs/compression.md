@@ -40,6 +40,32 @@ native and under wasm.
 - Sets the `Content-Encoding: gzip` header, unless the request already carries a `Content-Encoding`
 - Compression threshold can be adjusted by modifying the source code
 
+## Request Compression under wasm
+
+Under wasm `compress()` and `compress_with_level` come only with the
+`with-wasm-compression` feature:
+
+```toml
+[dependencies]
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
+    "with-wasm-compression",
+] }
+```
+
+Without the feature the two methods are not there, so a call is a compile error, not a
+request that quietly goes out uncompressed. `CompressionLevel` stays public either way.
+
+The feature is off by default because whether a body is compressed is decided at run
+time: the linker can not see that nothing calls `compress()`, so it can not drop the
+gzip code, and every wasm client would carry flate2 and crc32fast. The sixteen 1 KB
+tables of crc32fast hardly compress: 20 KB over the wire, measured on a trading
+terminal (brotli q11).
+
+The native backend does not depend on the feature: it always has `compress()`, and
+flate2 is what it decodes `accept_gzip()` with as well. Turning the feature on changes
+nothing there, so a crate built for both targets that calls `compress()` just turns it
+on, with no `cfg` of its own. `accept_gzip()` needs no feature on either backend.
+
 ## Response Decompression
 
 ```rust

@@ -8,7 +8,9 @@ use my_http_utils::UrlBuilder;
 use crate::body::HttpRequestBody;
 use crate::wasm::fetch::{build_request, execute_fetch, get_origin, sleep};
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlMode, FlUrlResponse, HttpVerb};
-use crate::{CompressionLevel, FlUrlError, FlUrlHeaders, RetryPolicy};
+#[cfg(feature = "with-wasm-compression")]
+use crate::CompressionLevel;
+use crate::{FlUrlError, FlUrlHeaders, RetryPolicy};
 
 /// Everything a request is made of, and everything that is done with it. [`FlUrl`]
 /// keeps one of these — or the first error that came up while it was being built —
@@ -24,6 +26,7 @@ pub(crate) struct FlUrlInner {
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     // `Some` once `compress`/`compress_with_level` asked for the body to be gzipped.
+    #[cfg(feature = "with-wasm-compression")]
     pub compress_body: Option<CompressionLevel>,
     pub print_input_request: bool,
     pub reuse_connection_timeout_sec: i64,
@@ -71,6 +74,7 @@ impl FlUrlInner {
             response_body_timeout: None,
             do_not_reuse_connection: false,
             connections_cache: None,
+            #[cfg(feature = "with-wasm-compression")]
             compress_body: None,
             print_input_request: false,
             reuse_connection_timeout_sec: 120,
@@ -79,10 +83,12 @@ impl FlUrlInner {
         })
     }
 
+    #[cfg(feature = "with-wasm-compression")]
     pub fn compress(self) -> Self {
         self.compress_with_level(CompressionLevel::Default)
     }
 
+    #[cfg(feature = "with-wasm-compression")]
     pub fn compress_with_level(mut self, level: CompressionLevel) -> Self {
         self.compress_body = Some(level);
         self
@@ -463,8 +469,8 @@ impl FlUrlInner {
     }
 
     /// Fills in `Content-Type` (from the body) if absent, materializes the body,
-    /// optionally writes the debug string and gzip-compresses the body — mirroring
-    /// the native `compile_request`.
+    /// optionally writes the debug string and, with `with-wasm-compression`,
+    /// gzip-compresses the body — mirroring the native `compile_request`.
     fn compile(
         &mut self,
         method: &str,
@@ -477,19 +483,21 @@ impl FlUrlInner {
             }
         }
 
-        let mut bytes = body.into_vec();
+        let bytes = body.into_vec();
 
         if let Some(debug) = debug {
             self.fill_debug(debug, method, &bytes);
         }
 
+        #[cfg(feature = "with-wasm-compression")]
         if let Some(level) = self.compress_body {
-            bytes = self.compress_body(bytes, level)?;
+            return self.compress_body(bytes, level);
         }
 
         Ok(bytes)
     }
 
+    #[cfg(feature = "with-wasm-compression")]
     fn compress_body(
         &mut self,
         body: Vec<u8>,

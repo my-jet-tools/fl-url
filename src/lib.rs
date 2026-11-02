@@ -13,7 +13,9 @@
 //! * **wasm32** (`cfg(target_arch = "wasm32")`) — the browser `fetch` backend in
 //!   [`mod@wasm`]. Connection pooling, TLS and redirects are handled by the
 //!   browser, so those knobs become no-ops; every request-building and
-//!   response-reading method keeps its native signature.
+//!   response-reading method keeps its native signature. `compress` and
+//!   `compress_with_level` are there only with the `with-wasm-compression` feature,
+//!   which is what brings flate2 into a bundle.
 //!
 //! Both backends alias their `FlUrl`, `FlUrlResponse`, `FlUrlHeaders`, … to this
 //! crate root, so `flurl::FlUrl` resolves to whichever backend is active and

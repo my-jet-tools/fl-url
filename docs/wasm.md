@@ -3,7 +3,8 @@
 `flurl` is a **single crate that compiles for both native and `wasm32`**, and the
 backend is chosen automatically by target — the public API (`FlUrl`,
 `FlUrlResponse`, `FlUrlError`, `FlUrlHeaders`, `IntoFlUrl`, `body::*`, …) is the
-same on both, so the same call sites compile everywhere:
+same on both, so the same call sites compile everywhere (`compress` under wasm
+[takes a feature](#request-compression)):
 
 ```rust
 use flurl::FlUrl;
@@ -28,10 +29,11 @@ let users: Vec<User> = response.get_body()?.into_json(1024 * 1024).await?;
 Neither backend module is public: both alias their types to the crate root — use
 `flurl::FlUrl`, never a backend path — and the shared pieces
 (`FlUrlError` and the request `body` types) live at the root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
-excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`.
+excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`,
+and flate2 only with [`with-wasm-compression`](#request-compression).
 
-Add it to a wasm project exactly like a normal dependency (no extra feature
-needed — the target is detected automatically):
+Add it to a wasm project exactly like a normal dependency (the target is detected
+automatically, and no feature is needed unless the client compresses a request body):
 
 ```toml
 [dependencies]
@@ -53,7 +55,7 @@ These **do** work under wasm: `set_timeout` bounds the request→headers round-t
 via `AbortController` + `setTimeout`; `set_response_body_timeout` bounds the body
 read on the same signal; `with_retries` and `with_retry` replay idempotent methods
 only, with the same semantics as on native (the `with_retry` pause is a
-`setTimeout`-driven future); `compress` and `compress_with_level` gzip the request body.
+`setTimeout`-driven future).
 
 One difference in the timeouts: natively `set_timeout` covers a read of the whole body
 as well (`into_vec`, `into_string`, `into_json`), under wasm it ends with the response
@@ -68,6 +70,29 @@ it): `with_client_certificate` (native + a TLS provider feature), all `*_ssh_*` 
 Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
 them with `wasm_bindgen_futures::spawn_local` / your framework's async context
 rather than `tokio::spawn`. The `.await` call sites are unchanged.
+
+## Request compression
+
+`compress` and `compress_with_level` gzip the request body, and under wasm they are
+there only with the `with-wasm-compression` feature:
+
+```toml
+[dependencies]
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
+    "with-wasm-compression",
+] }
+```
+
+Without the feature a call is a compile error, not a request that quietly goes out
+uncompressed; `CompressionLevel` stays public either way.
+
+Whether a body is compressed is decided at run time, so the linker can not drop the
+gzip code by itself: every bundle would carry flate2 and crc32fast, called or not. The
+sixteen 1 KB tables of crc32fast hardly compress: 20 KB over the wire, measured on a
+trading terminal (brotli q11).
+
+The native backend always has both and is not affected —
+see [Request Compression under wasm](compression.md#request-compression-under-wasm).
 
 ## Reading a response body
 
