@@ -55,15 +55,15 @@ impl FlUrlHeaders {
         self.len += 1;
     }
 
-    /// Adds `value` to the list header `name` (`Content-Encoding`). The result is one
-    /// line: `name: <what was there>, <value>`, or a new header when there was none.
-    /// Two lines would mean the same thing to HTTP, but a server that reads only the
-    /// first line of a header would see half the list. Codings go in the order they
-    /// were applied, so a coding applied after the ones already listed goes last.
+    /// Adds `value` to the list header `name`: the `Content-Encoding` a compressed or
+    /// encrypted body hands back. The result is one line: `name: <what was there>,
+    /// <value>`, or a new header when there was none. Two lines would mean the same
+    /// thing to HTTP, but a server that reads only the first line of a header would see
+    /// half the list. Codings go in the order they were applied, so the caller's own
+    /// come first: `br, gzip, aes128gcm`.
     ///
     /// The builder can only append, so when the header is already there the headers
     /// are put together again, in the same order.
-    #[cfg(feature = "encryption")]
     pub(crate) fn append_to_list_header(&mut self, name: &str, value: &str) {
         if !self.has_header(name) {
             self.add(name, value);
@@ -245,7 +245,6 @@ mod tests {
         assert_eq!(headers.len(), 1);
     }
 
-    #[cfg(feature = "encryption")]
     fn lines(headers: &FlUrlHeaders) -> Vec<(String, String)> {
         headers
             .iter()
@@ -253,7 +252,6 @@ mod tests {
             .collect()
     }
 
-    #[cfg(feature = "encryption")]
     #[test]
     fn a_list_header_that_is_not_there_is_added() {
         let mut headers = FlUrlHeaders::new();
@@ -271,7 +269,6 @@ mod tests {
 
     /// The value goes last, on the line that was there, and every other header keeps
     /// its place and what it marks (the Host header, the Connection header).
-    #[cfg(feature = "encryption")]
     #[test]
     fn a_list_header_that_is_there_gets_the_value_on_the_same_line() {
         let mut headers = FlUrlHeaders::new();
@@ -299,7 +296,6 @@ mod tests {
 
     /// A header that could not be added still fails the request after the headers are
     /// put together again.
-    #[cfg(feature = "encryption")]
     #[test]
     fn a_refused_header_is_still_reported_after_the_list_header_is_joined() {
         let mut headers = FlUrlHeaders::new();

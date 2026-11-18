@@ -41,16 +41,18 @@ with-rust-tls = ["_tls", "my-tls/with-rust-crypto-providers"]
 # even then only for callers that opt in per request.
 dangerous-tls = ["_tls", "my-tls/dangerous-tls"]
 
-# wasm only: compiles `.compress()` and flate2 into the bundle. The native backend always has both.
-# Whether a body is compressed is decided at run time, so the linker can not drop the
-# gzip code: without this switch every wasm client would carry flate2 and crc32fast,
-# called or not. Under wasm `.compress()` without it is a compile error.
-with-wasm-compression = ["dep:flate2"]
+# wasm only: compiles `.compress()`, which gzips a request body with my-http-utils'
+# `HttpRequestBody::compress` (its `compression` feature, flate2 underneath). The native
+# backend always has it. Whether a body is compressed is decided at run time, so the
+# linker can not drop the gzip code: without this switch every wasm client would carry
+# flate2 and crc32fast, called or not. Under wasm `.compress()` without it is a compile
+# error.
+with-wasm-compression = ["my-http-utils/compression"]
 
 # Native only: compiles `.encrypted(&key)`, which sends a request body encrypted with
-# `Content-Encoding: aes128gcm` (RFC 8188), the format of my-reverse-proxy's encrypted
-# calls. The key and the cipher come from my-http-utils (`HttpBodyEncryptionKey`), which
-# my-http-server uses too, so both ends encrypt the same way. All of it is pure Rust.
+# `Content-Encoding: aes128gcm` (RFC 8188), the time it was sent inside. The encryption
+# is my-http-utils' `HttpRequestBody::encrypt` with its `HttpBodyEncryptionKey`, which
+# my-http-server decrypts with, so both ends do it the same way. All of it is pure Rust.
 # The feature does not build for wasm: my-http-utils takes the salt of every body from
 # getrandom, which has no browser backend unless the application turns one on.
 encryption = ["my-http-utils/encryption"]
@@ -92,6 +94,12 @@ tokio = { version = "*", features = [
 hyper-util = { version = "*", features = ["tokio"] }
 http-body-util = { version = "*" }
 my-http-client = { tag = "0.1.0", git = "https://github.com/my-jet-tools/my-http-client.git" }
+# The same my-http-utils as above, with `compression` on: `.compress()` is always there
+# natively, and gzips a request body with `HttpRequestBody::compress`. Under wasm the
+# feature comes with `with-wasm-compression` instead.
+my-http-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-http-utils.git", features = [
+    "compression",
+] }
 # The data of a hyper body frame: what a request body is made of and what a response
 # body is read in. The wasm backend reads the browser's body into a `Vec<u8>` instead.
 bytes = "*"
@@ -100,8 +108,9 @@ http = "*"
 parking_lot = "*"
 ahash = "*"
 lazy_static = "*"
-# `.compress()` and the decoding `accept_gzip()` asks for. The one dependency of this
-# table which does compile to wasm: there it is optional, see below.
+# Decodes a gzipped response, which `accept_gzip()` asks for (`MultiGzDecoder` in
+# src/non_wasm/fl_url_body_reader.rs). A request body is gzipped by my-http-utils. Under
+# wasm the browser decodes the response, so there it is not needed.
 flate2 = { version = "*", default-features = false, features = ["rust_backend"] }
 
 # wasm backend (`wasm`): the browser fetch API via web-sys.
@@ -125,9 +134,6 @@ web-sys = { version = "0.3", features = [
     "ReadableStreamDefaultReader",
     "console",
 ] }
-# Pure-Rust backend so it compiles under wasm. Only for `.compress()`, so only with
-# `with-wasm-compression`: a response is decoded by the browser.
-flate2 = { version = "*", default-features = false, features = ["rust_backend"], optional = true }
 
 # The streamed-body tests stand up a raw tokio TCP server and read the request off
 # the wire themselves, which needs more of tokio than the library does.
@@ -140,7 +146,8 @@ tokio = { version = "*", features = [
     "time",
 ] }
 
-# Gzips a response body for tests/body_reader.rs.
+# Gzips a response body for tests/body_reader.rs, and gunzips what the test servers of
+# tests/request_compression.rs and tests/request_encryption.rs receive.
 [dev-dependencies]
 flate2 = { version = "*" }
 

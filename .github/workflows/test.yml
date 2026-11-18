@@ -48,7 +48,8 @@ jobs:
       - name: Test with my-http-client websocket support
         run: cargo test --features my-http-client/with-websocket
 
-      # tests/request_encryption.rs and the header joining in fl_url_headers.rs.
+      # tests/request_encryption.rs: encryption, and a body that comes compressed and
+      # encrypted already.
       - name: Test with encryption
         run: cargo test --features encryption
 

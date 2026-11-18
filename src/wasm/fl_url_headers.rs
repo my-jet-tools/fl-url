@@ -32,6 +32,43 @@ impl FlUrlHeaders {
         self.len += 1;
     }
 
+    /// Adds `value` to the list header `name`: the `Content-Encoding` a compressed body
+    /// hands back. The result is one line, `name: <what was there>, <value>`, or a new
+    /// header when there was none, the same as the native backend does it. Codings go
+    /// in the order they were applied, so the caller's own come first: `br, gzip`.
+    pub(crate) fn append_to_list_header(&mut self, name: &str, value: &str) {
+        let Some(first) = self
+            .headers
+            .iter()
+            .position(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        else {
+            self.add(name, value);
+            return;
+        };
+
+        // Every line of the header is joined into the first one, the new value after
+        // them all.
+        let mut combined = self
+            .headers
+            .iter()
+            .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+            .map(|(_, header_value)| header_value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        combined.push_str(", ");
+        combined.push_str(value);
+
+        self.headers[first].1 = combined;
+
+        let mut index = 0;
+        self.headers.retain(|(header_name, _)| {
+            let keep = index <= first || !header_name.eq_ignore_ascii_case(name);
+            index += 1;
+            keep
+        });
+        self.len = self.headers.len();
+    }
+
     pub fn has_host_header(&self) -> bool {
         self.host_header_present
     }

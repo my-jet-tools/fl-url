@@ -716,46 +716,98 @@ impl FlUrlInner {
         }
     }
 
-    fn compress_body(
+    /// The body as it goes on the wire, with what it needs in the headers: the
+    /// `Content-Type` of the body as it was made, and the `Content-Encoding` the body
+    /// hands back once it is compressed or encrypted. The `*_with_debug` dump is
+    /// written here as well, from the body as it was given.
+    fn compile_body(
         &mut self,
-        body: Vec<u8>,
-        level: CompressionLevel,
+        method: &Method,
+        body: HttpRequestBody,
+        debug: Option<&mut String>,
     ) -> Result<Vec<u8>, FlUrlError> {
-        if body.len() < 64 {
-            return Ok(body);
+        if let Some(content_type) = body.get_content_type() {
+            if !self.headers.has_header("Content-Type") {
+                self.headers.add("Content-Type", content_type.as_str());
+            }
         }
 
-        if !self.headers.has_header("Content-Encoding") {
-            self.headers.add("Content-Encoding", "gzip");
+        let body = match debug {
+            Some(debug) => self.dump_body(debug, method.as_str(), body),
+            None => body,
+        };
+
+        let body = self.encode_body(body)?;
+
+        // `Content-Encoding` is a list: the caller's own codings come first, on the
+        // same line (`br, gzip`).
+        for (name, value) in body.get_headers() {
+            self.headers.append_to_list_header(name, value);
         }
 
-        crate::compression::gzip(&body, level)
+        Ok(body.into_vec())
     }
 
-    /// The body as it goes on the wire: gzipped if `compress` asked for it, then
-    /// encrypted if `encrypted` did, with `Content-Encoding` listing the codings in
-    /// the order they were applied (`gzip, aes128gcm`). Encrypted data does not
-    /// compress, so the order is never the other way round.
+    /// The body gzipped if `compress` asked for it, then encrypted if `encrypted` did.
+    /// my-http-utils does both, and the body it gives back lists the codings in the
+    /// order they were applied (`gzip, aes128gcm`). Encrypted data does not compress,
+    /// so the order is never the other way round.
+    ///
+    /// A body can come compressed or encrypted already (`HttpRequestBody::Encoded`),
+    /// and keeps its own rules: `compress` leaves it as it is, `encrypted` encrypts a
+    /// compressed one and refuses one that is encrypted already
+    /// (`FlUrlError::RequestBuild`).
     ///
     /// An empty body stays empty, with no `Content-Encoding`: a GET has nothing to
     /// encrypt, and an encrypted empty body would make it a request with a body.
-    fn encode_body(&mut self, mut body: Vec<u8>) -> Result<Vec<u8>, FlUrlError> {
+    fn encode_body(&self, mut body: HttpRequestBody) -> Result<HttpRequestBody, FlUrlError> {
         if let Some(level) = self.compress_body {
-            body = self.compress_body(body, level)?;
+            body = body.compress_with_level(level);
         }
 
         #[cfg(feature = "encryption")]
         if let Some(key) = self.encryption_key.as_ref() {
-            if !body.is_empty() {
-                body = key.encrypt(&body);
-                self.headers.append_to_list_header(
-                    "Content-Encoding",
-                    my_http_utils::AES128GCM_CONTENT_ENCODING,
-                );
-            }
+            body = body.encrypt(key)?;
         }
 
         Ok(body)
+    }
+
+    /// Writes the request into `debug` and gives the body back to be sent.
+    ///
+    /// A body that came compressed or encrypted is told by its length and its
+    /// `Content-Encoding`. Any other body is dumped as it was made, before fl-url
+    /// compresses or encrypts it, and so it is taken out to its bytes: it goes on as
+    /// `Raw`, which compresses and encrypts the same way. Its `Content-Type` is in the
+    /// headers by now, so it needs none of its own.
+    ///
+    /// `HttpRequestBody::Encoded` can be named here: natively fl-url always turns on
+    /// my-http-utils' `compression`, which the variant comes with.
+    fn dump_body(
+        &self,
+        debug: &mut String,
+        method: &str,
+        body: HttpRequestBody,
+    ) -> HttpRequestBody {
+        if let HttpRequestBody::Encoded { data, headers, .. } = &body {
+            self.compile_debug_info_with_body(debug, method, &[]);
+            debug.push_str(&crate::body::describe_encoded_body(data.len(), headers));
+            return body;
+        }
+
+        // A stream has no bytes to dump, and goes on as it is.
+        if body.is_stream() {
+            self.compile_debug_info_with_body(debug, method, &[]);
+            return body;
+        }
+
+        let data = body.into_vec();
+        self.compile_debug_info_with_body(debug, method, &data);
+
+        HttpRequestBody::Raw {
+            data,
+            content_type: None,
+        }
     }
 
     fn get_path_and_query_with_leading_slash(&self) -> String {
@@ -798,19 +850,7 @@ impl FlUrlInner {
         body: HttpRequestBody,
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
-        if let Some(content_type) = body.get_content_type() {
-            if !self.headers.has_header("Content-Type") {
-                self.headers.add("Content-Type", content_type.as_str());
-            }
-        }
-
-        let mut body = body.into_vec();
-
-        if let Some(debug) = debug {
-            self.compile_debug_info_with_body(debug, method.as_str(), &body);
-        }
-
-        body = self.encode_body(body)?;
+        let body = self.compile_body(&method, body, debug)?;
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
 
@@ -897,19 +937,7 @@ impl FlUrlInner {
         body: HttpRequestBody,
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http1::MyHttpRequest, FlUrlError> {
-        if let Some(content_type) = body.get_content_type() {
-            if !self.headers.has_header("Content-Type") {
-                self.headers.add("Content-Type", content_type.as_str());
-            }
-        }
-
-        let mut body = body.into_vec();
-
-        if let Some(debug) = debug {
-            self.compile_debug_info_with_body(debug, method.as_str(), &body);
-        }
-
-        body = self.encode_body(body)?;
+        let body = self.compile_body(&method, body, debug)?;
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
 

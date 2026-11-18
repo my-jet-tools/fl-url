@@ -30,7 +30,8 @@ Neither backend module is public: both alias their types to the crate root — u
 `flurl::FlUrl`, never a backend path — and the shared pieces
 (`FlUrlError` and the request `body` types) live at the root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
 excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`,
-and flate2 only with [`with-wasm-compression`](#request-compression).
+and flate2 (through my-http-utils' `compression`) only with
+[`with-wasm-compression`](#request-compression).
 
 Add it to a wasm project exactly like a normal dependency (the target is detected
 automatically, and no feature is needed unless the client compresses a request body):
@@ -85,12 +86,18 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", featu
 ```
 
 Without the feature a call is a compile error, not a request that quietly goes out
-uncompressed; `CompressionLevel` stays public either way.
+uncompressed; `CompressionLevel` stays public either way. The feature turns on
+my-http-utils' `compression`: the body is gzipped by `HttpRequestBody::compress`, and a
+`Content-Encoding` the caller set gets `gzip` after it on the same line (`br, gzip`).
 
 Whether a body is compressed is decided at run time, so the linker can not drop the
 gzip code by itself: every bundle would carry flate2 and crc32fast, called or not. The
 sixteen 1 KB tables of crc32fast hardly compress: 20 KB over the wire, measured on a
 trading terminal (brotli q11).
+
+A body that comes compressed already (`HttpRequestBody::compress`, with my-http-utils'
+`compression` turned on by this feature or by another crate) goes out as it is, with its
+`Content-Encoding`, with or without the feature.
 
 The native backend always has both and is not affected —
 see [Request Compression under wasm](compression.md#request-compression-under-wasm).

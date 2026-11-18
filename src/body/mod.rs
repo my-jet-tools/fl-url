@@ -4,6 +4,28 @@
 //! same type on native and wasm alike.
 pub use my_http_utils::body::{FormDataBody, HttpRequestBody, UrlEncodedBody};
 
+/// What a `*_with_debug` dump says of a body that came compressed or encrypted
+/// already: its length and its `Content-Encoding` (`headers`, what
+/// `HttpRequestBody::get_headers` gives), never its bytes. They are gzip or
+/// ciphertext, and a body is encrypted because it carries secrets.
+///
+/// It takes the length rather than the body: `HttpRequestBody::Encoded` is there only
+/// with my-http-utils' `compression` or `encryption` feature, and a wasm build without
+/// `with-wasm-compression` can not name it, although another crate in the build can
+/// switch the feature on and hand such a body over.
+pub(crate) fn describe_encoded_body(len: usize, headers: &[(&'static str, String)]) -> String {
+    let mut result = format!("Body: {} bytes, given encoded", len);
+
+    for (name, value) in headers {
+        result.push_str("; ");
+        result.push_str(name);
+        result.push_str(": ");
+        result.push_str(value);
+    }
+
+    result
+}
+
 /// Supplies randomness to `my_http_utils` request building — currently only the
 /// `multipart/form-data` boundary. `my_http_utils` itself carries no RNG (so it stays
 /// wasm-safe); FlUrl plugs a target-appropriate generator in here. Used as the

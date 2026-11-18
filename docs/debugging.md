@@ -61,6 +61,11 @@ A body sent with [`encrypted(&key)`](encryption.md) is the other way round: it i
 encrypted because it carries secrets, and a debug string ends up in a log more often
 than not, so the dump gets `Body: <n> bytes, sent encrypted` instead of the text.
 
+A body that came compressed or encrypted already (`HttpRequestBody::as_json(&x)
+.compress().encrypt(&key)?`) is never dumped: its bytes are gzip or ciphertext. The dump
+gets its length and its codings instead:
+`Body: <n> bytes, given encoded; Content-Encoding: gzip, aes128gcm`.
+
 The streamed variants are the one exception to "the body is in the dump": a streamed
 payload exists only as it is written to the socket, so printing it would mean
 buffering the very thing streaming avoids. Their dump is the request head alone.

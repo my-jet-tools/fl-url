@@ -125,6 +125,18 @@ impl FlUrl {
 
     /// Gzips a request body of 64 bytes and up at [`CompressionLevel::Default`] and
     /// sends it with `Content-Encoding: gzip`. A shorter body goes out as it is.
+    ///
+    /// The body is gzipped by my-http-utils: this is
+    /// [`HttpRequestBody::compress`](crate::body::HttpRequestBody::compress) applied to
+    /// the body the request is sent with.
+    ///
+    /// * A `Content-Encoding` the caller set stays, with `gzip` after it on the same
+    ///   line: `br, gzip`.
+    /// * A body that came compressed or encrypted already
+    ///   (`HttpRequestBody::Encoded`) goes out as it is.
+    /// * With [`Self::encrypted`] the body is gzipped first, then encrypted, whichever
+    ///   order the two were called in.
+    /// * A streamed body is refused with `FlUrlError::StreamedBodyCanNotBeCompressed`.
     pub fn compress(self) -> Self {
         self.map(|inner| inner.compress())
     }
@@ -137,15 +149,26 @@ impl FlUrl {
     }
 
     /// Encrypts the request body with `key` and sends it with
-    /// `Content-Encoding: aes128gcm` (RFC 8188). This is the format of
-    /// my-reverse-proxy's encrypted calls, and the one my-http-server decrypts.
+    /// `Content-Encoding: aes128gcm` (RFC 8188), in the format my-http-server
+    /// decrypts.
+    ///
+    /// The body is encrypted by my-http-utils: this is
+    /// [`HttpRequestBody::encrypt`](crate::body::HttpRequestBody::encrypt) applied to
+    /// the body the request is sent with. Its plain text is an
+    /// [`EncryptedBody`](my_http_utils::EncryptedBody): the time it was sent (unix
+    /// microseconds, 8 bytes, little-endian), then the body. The server takes the time
+    /// off, and can refuse a body sent too long ago.
     ///
     /// * A fresh random salt goes into every body, so the same body never looks the
     ///   same twice. A retry resends the bytes already built: it does not encrypt
-    ///   again.
+    ///   again, and the salt stays the same.
     /// * With [`Self::compress`] the body is gzipped first, then encrypted, and goes
     ///   out with `Content-Encoding: gzip, aes128gcm`. A `Content-Encoding` the caller
     ///   set gets `aes128gcm` added at the end of the same line.
+    /// * A body that came compressed already
+    ///   (`HttpRequestBody::as_json(&x).compress()`) is encrypted as it is. One that
+    ///   came encrypted already is refused with `FlUrlError::RequestBuild`: a body is
+    ///   not encrypted twice.
     /// * An empty body (a GET, a DELETE) is sent as it is: there is nothing to
     ///   encrypt.
     /// * The `*_with_debug` dump gets the length of the body, not its text.
@@ -154,12 +177,9 @@ impl FlUrl {
     ///   `Content-Encoding: aes128gcm`, and the caller opens it with
     ///   [`HttpBodyEncryptionKey::decrypt`](my_http_utils::HttpBodyEncryptionKey::decrypt).
     ///
-    /// The plain text is whatever the server expects. my-reverse-proxy, for one, wants a
-    /// JSON with `ts`, the sender's clock in unix seconds, and that is the caller's to
-    /// put in.
-    ///
     /// ```no_run
     /// # async fn doc(key_from_settings: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// use flurl::body::HttpRequestBody;
     /// use flurl::my_http_utils::HttpBodyEncryptionKey;
     ///
     /// let key = HttpBodyEncryptionKey::from_base64(key_from_settings)?;
@@ -167,7 +187,7 @@ impl FlUrl {
     /// let response = flurl::FlUrl::new("http://127.0.0.1:8000")
     ///     .append_path_segment("api")
     ///     .encrypted(&key)
-    ///     .post_json(&serde_json::json!({ "ts": 1_700_000_000 }))
+    ///     .post(HttpRequestBody::as_json(&serde_json::json!({ "email": "a@b.com" })))
     ///     .await?;
     /// # Ok(())
     /// # }

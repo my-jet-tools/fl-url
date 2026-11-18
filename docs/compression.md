@@ -35,10 +35,36 @@ native and under wasm.
 
 ## Body Compression
 
-- `compress()` and `compress_with_level` are only applied if the body size is >= 64 bytes; a shorter body goes out as it is
-- Uses gzip compression
-- Sets the `Content-Encoding: gzip` header, unless the request already carries a `Content-Encoding`
-- Compression threshold can be adjusted by modifying the source code
+The body is gzipped by my-http-utils: `compress()` is `HttpRequestBody::compress`
+applied to the body the request is sent with.
+
+- A body of 64 bytes and up is gzipped; a shorter body only gets bigger gzipped, so it
+  goes out as it is. The threshold is my-http-utils'.
+- The request goes out with `Content-Encoding: gzip`. A `Content-Encoding` the caller
+  set with `with_header` stays, with `gzip` after it on the same line: `br, gzip`.
+- With [`encrypted(&key)`](encryption.md) the body is gzipped first, then encrypted:
+  `Content-Encoding: gzip, aes128gcm`.
+- A streamed body is refused with `FlUrlError::StreamedBodyCanNotBeCompressed`.
+
+## A body that comes compressed
+
+The body can be gzipped before it is given to `post`, `put` or `patch`:
+
+```rust
+use flurl::body::HttpRequestBody;
+use flurl::CompressionLevel;
+
+let body = HttpRequestBody::as_json(&large_data).compress_with_level(CompressionLevel::Best);
+
+let response = FlUrl::new("https://api.example.com/data")
+    .post(body)
+    .await?;
+```
+
+It goes out as it is, with the `Content-Type` of the body as it was made and
+`Content-Encoding: gzip`. `.compress()` on the builder changes nothing on it: it is
+gzipped once. A body that comes encrypted is not compressed either, since encrypted
+data does not compress. See [Encrypted Request Body](encryption.md#a-body-that-comes-compressed-or-encrypted).
 
 ## Request Compression under wasm
 
@@ -55,16 +81,20 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", featu
 Without the feature the two methods are not there, so a call is a compile error, not a
 request that quietly goes out uncompressed. `CompressionLevel` stays public either way.
 
-The feature is off by default because whether a body is compressed is decided at run
-time: the linker can not see that nothing calls `compress()`, so it can not drop the
-gzip code, and every wasm client would carry flate2 and crc32fast. The sixteen 1 KB
-tables of crc32fast hardly compress: 20 KB over the wire, measured on a trading
-terminal (brotli q11).
+The feature turns on my-http-utils' `compression`, which gzips the body. It is off by
+default because whether a body is compressed is decided at run time: the linker can not
+see that nothing calls `compress()`, so it can not drop the gzip code, and every wasm
+client would carry flate2 and crc32fast. The sixteen 1 KB tables of crc32fast hardly
+compress: 20 KB over the wire, measured on a trading terminal (brotli q11).
 
-The native backend does not depend on the feature: it always has `compress()`, and
-flate2 is what it decodes `accept_gzip()` with as well. Turning the feature on changes
-nothing there, so a crate built for both targets that calls `compress()` just turns it
-on, with no `cfg` of its own. `accept_gzip()` needs no feature on either backend.
+A body that comes compressed goes out with its `Content-Encoding` with or without the
+feature: another crate in the build can turn my-http-utils' `compression` on and hand
+such a body over.
+
+The native backend does not depend on the feature: it always turns my-http-utils'
+`compression` on, so it always has `compress()`. Turning the feature on changes nothing
+there, so a crate built for both targets that calls `compress()` just turns it on, with
+no `cfg` of its own. `accept_gzip()` needs no feature on either backend.
 
 ## Response Decompression
 

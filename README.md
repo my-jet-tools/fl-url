@@ -15,9 +15,9 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git" }
 
 `https://` needs a TLS provider feature — `with-ring-tls` or `with-rust-tls`; with neither, an `https://` request fails with `FlUrlError::UnsupportedScheme`. TLS is decided once for the whole application. The features and how to choose between them: [Installation](docs/index_resource.md#installation).
 
-Under `wasm32` `.compress()` comes only with the `with-wasm-compression` feature, so that a client which never compresses a request body does not carry flate2: it is decided at run time, and the linker can not drop it. The native backend always has it. See [Request Compression under wasm](docs/compression.md#request-compression-under-wasm).
+Under `wasm32` `.compress()` comes only with the `with-wasm-compression` feature, so that a client which never compresses a request body does not carry flate2: it is decided at run time, and the linker can not drop it. The native backend always has it. The body is gzipped by my-http-utils (`HttpRequestBody::compress`), which the feature turns on. See [Request Compression under wasm](docs/compression.md#request-compression-under-wasm).
 
-The `encryption` feature (native only) adds `.encrypted(&key)`, which encrypts the request body and sends it with `Content-Encoding: aes128gcm` (RFC 8188). This is the format of my-reverse-proxy's encrypted calls. The key is `HttpBodyEncryptionKey` from my-http-utils (`flurl::my_http_utils::HttpBodyEncryptionKey::from_base64`), which my-http-server uses too. See [Encrypted Request Body](docs/encryption.md).
+The `encryption` feature (native only) adds `.encrypted(&key)`, which encrypts the request body and sends it with `Content-Encoding: aes128gcm` (RFC 8188), the time it was sent inside, in the format my-http-server decrypts. The key and the encryption come from my-http-utils (`flurl::my_http_utils::HttpBodyEncryptionKey::from_base64`, `HttpRequestBody::encrypt`), so a body can also come compressed and encrypted already: `HttpRequestBody::as_json(&x).compress().encrypt(&key)?`. See [Encrypted Request Body](docs/encryption.md).
 
 ```rust
 use flurl::FlUrl;
@@ -45,8 +45,8 @@ The library is documented in [`docs/`](docs). [The basics](docs/index_resource.m
 - [**known-ip**](docs/known-ip.md) — connect to a known ip without DNS, keeping the host name for `Host`, SNI and the certificate check.
 - [**timeouts-and-limits**](docs/timeouts-and-limits.md) — request and body timeouts, the size limit a response body is read with.
 - [**retries**](docs/retries.md) — `with_retries` and `with_retry`.
-- [**compression**](docs/compression.md) — gzip of a request body and of a response; under wasm a request body needs `with-wasm-compression`.
-- [**encryption**](docs/encryption.md) — `encrypted(&key)`: the request body as `Content-Encoding: aes128gcm` (RFC 8188), the format of my-reverse-proxy's encrypted calls (`encryption` feature, native only).
+- [**compression**](docs/compression.md) — gzip of a request body and of a response, a body that comes gzipped already; under wasm a request body needs `with-wasm-compression`.
+- [**encryption**](docs/encryption.md) — `encrypted(&key)`: the request body as `Content-Encoding: aes128gcm` (RFC 8188) with the time it was sent inside, a body that comes compressed and encrypted already (`encryption` feature, native only).
 - [**debugging**](docs/debugging.md) — printing a request and the `*_with_debug` methods.
 
 ## License

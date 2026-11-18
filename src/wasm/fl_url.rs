@@ -89,6 +89,15 @@ impl FlUrl {
 
     /// Gzips a request body of 64 bytes and up at [`CompressionLevel::Default`] and
     /// sends it with `Content-Encoding: gzip`. A shorter body goes out as it is.
+    ///
+    /// The body is gzipped by my-http-utils: this is
+    /// [`HttpRequestBody::compress`](crate::body::HttpRequestBody::compress) applied to
+    /// the body the request is sent with.
+    ///
+    /// * A `Content-Encoding` the caller set stays, with `gzip` after it on the same
+    ///   line: `br, gzip`.
+    /// * A body that came compressed already (`HttpRequestBody::Encoded`) goes out as
+    ///   it is.
     #[cfg(feature = "with-wasm-compression")]
     pub fn compress(self) -> Self {
         self.map(|inner| inner.compress())

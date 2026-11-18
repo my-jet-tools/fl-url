@@ -399,7 +399,7 @@ impl FlUrlInner {
             _ => {}
         }
 
-        let body_bytes = self.compile(method, body, debug)?;
+        let body_bytes = self.compile(method, body, debug);
         let url = self.url_builder.to_string();
         let header_list: Vec<(String, String)> = self
             .headers
@@ -468,50 +468,77 @@ impl FlUrlInner {
         ))
     }
 
-    /// Fills in `Content-Type` (from the body) if absent, materializes the body,
-    /// optionally writes the debug string and, with `with-wasm-compression`,
-    /// gzip-compresses the body — mirroring the native `compile_request`.
+    /// The body as it goes on the wire, with what it needs in the headers: the
+    /// `Content-Type` of the body as it was made, and the `Content-Encoding` the body
+    /// hands back once it is compressed. With `with-wasm-compression`, `compress` gzips
+    /// it with my-http-utils' `HttpRequestBody::compress_with_level`. The debug dump is
+    /// written here as well, from the body as it was given. It mirrors the native
+    /// `compile_body`, with no encryption: there is none under wasm.
+    ///
+    /// A body that came compressed already goes out as it is, with its
+    /// `Content-Encoding`, and the dump tells its length, not its bytes. Such a body is
+    /// known by its headers rather than by its variant (`HttpRequestBody::Encoded`):
+    /// the variant is there only with my-http-utils' `compression` feature, which
+    /// another crate in the build can switch on without `with-wasm-compression`.
     fn compile(
         &mut self,
         method: &str,
         body: HttpRequestBody,
         debug: Option<&mut String>,
-    ) -> Result<Vec<u8>, FlUrlError> {
+    ) -> Vec<u8> {
         if let Some(content_type) = body.get_content_type() {
             if !self.headers.has_header("Content-Type") {
                 self.headers.add("Content-Type", content_type.as_str());
             }
         }
 
-        let bytes = body.into_vec();
+        let came_with: Vec<(&'static str, String)> = body.get_headers().to_vec();
 
-        if let Some(debug) = debug {
-            self.fill_debug(debug, method, &bytes);
+        if !came_with.is_empty() {
+            let data = body.into_vec();
+
+            if let Some(debug) = debug {
+                self.fill_debug(debug, method, &[]);
+                debug.push_str(&crate::body::describe_encoded_body(data.len(), &came_with));
+            }
+
+            self.append_content_encoding(&came_with);
+            return data;
         }
+
+        // A body as it was made is dumped before it is compressed, so it is taken out
+        // to its bytes and goes on as `Raw`, which compresses the same way. Its
+        // `Content-Type` is in the headers by now, so it needs none of its own.
+        let body = match debug {
+            Some(debug) => {
+                let data = body.into_vec();
+                self.fill_debug(debug, method, &data);
+
+                HttpRequestBody::Raw {
+                    data,
+                    content_type: None,
+                }
+            }
+            None => body,
+        };
 
         #[cfg(feature = "with-wasm-compression")]
-        if let Some(level) = self.compress_body {
-            return self.compress_body(bytes, level);
-        }
+        let body = match self.compress_body {
+            Some(level) => body.compress_with_level(level),
+            None => body,
+        };
 
-        Ok(bytes)
+        self.append_content_encoding(body.get_headers());
+
+        body.into_vec()
     }
 
-    #[cfg(feature = "with-wasm-compression")]
-    fn compress_body(
-        &mut self,
-        body: Vec<u8>,
-        level: CompressionLevel,
-    ) -> Result<Vec<u8>, FlUrlError> {
-        if body.len() < 64 {
-            return Ok(body);
+    /// The headers a compressed body hands back. `Content-Encoding` is a list: the
+    /// caller's own codings come first, on the same line (`br, gzip`).
+    fn append_content_encoding(&mut self, headers: &[(&'static str, String)]) {
+        for (name, value) in headers {
+            self.headers.append_to_list_header(name, value);
         }
-
-        if !self.headers.has_header("Content-Encoding") {
-            self.headers.add("Content-Encoding", "gzip");
-        }
-
-        crate::compression::gzip(&body, level)
     }
 
     fn fill_debug(&self, out: &mut String, method: &str, body: &[u8]) {

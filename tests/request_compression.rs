@@ -1,6 +1,7 @@
 //! `compress()` and `compress_with_level()` against a real server, in every mode: what
 //! lands on the wire is a gzip of the body at the level asked for, marked
-//! `Content-Encoding: gzip`, and a body too short to be worth it goes out as it is.
+//! `Content-Encoding: gzip` after the caller's own codings, and a body too short to be
+//! worth it goes out as it is. A body the caller gzipped already is not gzipped again.
 //!
 //! The level is read off the gzip header itself: its XFL byte is `4` for the fastest
 //! compression, `2` for the best one and `0` for anything between (RFC 1952).
@@ -107,18 +108,25 @@ impl Server {
 
     /// Posts `body` with what `build` adds to the request.
     async fn post(&self, build: impl FnOnce(FlUrl) -> FlUrl, body: &[u8]) -> Received {
+        self.post_body(
+            build,
+            HttpRequestBody::from_raw_data(body.to_vec(), Some("application/json")),
+        )
+        .await
+    }
+
+    /// Posts `body` as it is given, with what `build` adds to the request.
+    async fn post_body(
+        &self,
+        build: impl FnOnce(FlUrl) -> FlUrl,
+        body: HttpRequestBody,
+    ) -> Received {
         let fl_url = FlUrl::new(self.url.as_str())
             .update_mode(self.mode)
             .set_connections_cache(self.cache.clone())
             .set_timeout(Duration::from_secs(3));
 
-        let mut response = build(fl_url)
-            .post(HttpRequestBody::from_raw_data(
-                body.to_vec(),
-                Some("application/json"),
-            ))
-            .await
-            .unwrap();
+        let mut response = build(fl_url).post(body).await.unwrap();
         assert_eq!(response.get_status_code(), 200, "{:?}", self.mode);
 
         let content_encoding = response
@@ -205,4 +213,59 @@ async fn a_body_under_64_bytes_goes_out_as_it_is() {
 
     assert_eq!(received.content_encoding, None);
     assert_eq!(received.body, body);
+}
+
+/// The caller's own `Content-Encoding` stays, with `gzip` after it on the same line,
+/// whether the header was set before or after `compress()`.
+#[tokio::test]
+async fn the_callers_content_encoding_gets_gzip_on_the_same_line() {
+    let body = json_body();
+
+    for mode in MODES {
+        let server = Server::start(mode).await;
+
+        for build in [
+            (|fl_url: FlUrl| fl_url.with_header("Content-Encoding", "br").compress())
+                as fn(FlUrl) -> FlUrl,
+            |fl_url: FlUrl| fl_url.compress().with_header("Content-Encoding", "br"),
+        ] {
+            let received = server.post(build, &body).await;
+
+            assert_eq!(
+                received.content_encoding.as_deref(),
+                Some("br, gzip"),
+                "{mode:?}"
+            );
+            assert_eq!(gunzip(&received.body), body, "{mode:?}");
+        }
+    }
+}
+
+/// A body the caller gzipped goes out as it came, with or without `compress()`.
+#[tokio::test]
+async fn a_body_that_comes_compressed_is_not_compressed_again() {
+    let body = json_body();
+
+    for mode in MODES {
+        let server = Server::start(mode).await;
+
+        for build in [
+            (|fl_url: FlUrl| fl_url) as fn(FlUrl) -> FlUrl,
+            |fl_url: FlUrl| fl_url.compress_with_level(CompressionLevel::Best),
+        ] {
+            let compressed =
+                HttpRequestBody::from_raw_data(body.clone(), Some("application/json"))
+                    .compress_with_level(CompressionLevel::Fast);
+
+            let received = server.post_body(build, compressed).await;
+
+            assert_eq!(
+                received.content_encoding.as_deref(),
+                Some("gzip"),
+                "{mode:?}"
+            );
+            assert_eq!(received.body[XFL], 4, "{mode:?}: gzipped once, as the caller did");
+            assert_eq!(gunzip(&received.body), body, "{mode:?}");
+        }
+    }
 }
