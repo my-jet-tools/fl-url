@@ -515,7 +515,7 @@ impl FlUrlInner {
     }
 
     fn fill_debug(&self, out: &mut String, method: &str, body: &[u8]) {
-        out.push_str("[");
+        out.push('[');
         out.push_str(method);
         out.push_str("] PathAndQuery: '");
         out.push_str(self.url_builder.get_path_and_query().as_str());
@@ -544,7 +544,8 @@ impl FlUrlInner {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    /// The path and query and the headers: what `Display` of `FlUrl` shows.
+    pub fn describe(&self) -> String {
         let mut result = String::new();
         result.push_str("PathAndQuery: '");
         result.push_str(self.url_builder.get_path_and_query().as_str());

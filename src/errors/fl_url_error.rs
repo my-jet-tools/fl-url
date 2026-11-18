@@ -39,6 +39,12 @@ pub enum FlUrlError {
     #[cfg(not(target_arch = "wasm32"))]
     StreamedBodyCanNotBeCompressed,
 
+    /// `.encrypted()` was combined with a streamed request body. The body is encrypted
+    /// as one buffer, the same as gzip compresses it, so the request is refused
+    /// instead of quietly holding the whole payload in memory.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "encryption"))]
+    StreamedBodyCanNotBeEncrypted,
+
     #[cfg(not(target_arch = "wasm32"))]
     HttpError(hyper::http::Error),
     #[cfg(all(not(target_arch = "wasm32"), feature = "_tls"))]
@@ -56,19 +62,16 @@ pub enum FlUrlError {
 
 impl FlUrlError {
     pub fn is_timeout(&self) -> bool {
-        if matches!(self, FlUrlError::Timeout) {
+        // Natively a request that timed out comes from my-http-client.
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(
+            self,
+            FlUrlError::MyHttpClientError(my_http_client::MyHttpClientError::RequestTimeout(_))
+        ) {
             return true;
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if matches!(
-                self,
-                FlUrlError::MyHttpClientError(my_http_client::MyHttpClientError::RequestTimeout(_))
-            ) {
-                return true;
-            }
-        }
-        false
+
+        matches!(self, FlUrlError::Timeout)
     }
 }
 

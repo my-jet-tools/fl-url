@@ -57,7 +57,7 @@ impl FlUrlHeaders {
         self.len == 0
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (&'s str, &'s str)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.headers
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))

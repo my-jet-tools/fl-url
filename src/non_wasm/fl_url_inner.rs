@@ -60,6 +60,9 @@ pub(crate) struct FlUrlInner {
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     // `Some` once `compress`/`compress_with_level` asked for the body to be gzipped.
     pub compress_body: Option<CompressionLevel>,
+    // `Some` once `encrypted` asked for the body to be encrypted with this key.
+    #[cfg(feature = "encryption")]
+    encryption_key: Option<my_http_utils::HttpBodyEncryptionKey>,
     pub decompress_gzip_response: bool,
     pub print_input_request: bool,
     // If we reuse connection and it has not been used more seconds than this parameter - it disposed
@@ -82,7 +85,7 @@ impl FlUrlInner {
         let (url_builder, credentials, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
+                    .map_err(FlUrlError::InvalidUrl)?;
 
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
@@ -118,7 +121,7 @@ impl FlUrlInner {
         let (url_builder, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
+                    .map_err(FlUrlError::InvalidUrl)?;
 
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
@@ -154,6 +157,8 @@ impl FlUrlInner {
             response_body_timeout: None,
             print_input_request: false,
             compress_body: None,
+            #[cfg(feature = "encryption")]
+            encryption_key: None,
             decompress_gzip_response: false,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_credentials: credentials,
@@ -181,6 +186,12 @@ impl FlUrlInner {
 
     pub fn compress_with_level(mut self, level: CompressionLevel) -> Self {
         self.compress_body = Some(level);
+        self
+    }
+
+    #[cfg(feature = "encryption")]
+    pub fn encrypted(mut self, key: &my_http_utils::HttpBodyEncryptionKey) -> Self {
+        self.encryption_key = Some(key.clone());
         self
     }
 
@@ -260,7 +271,7 @@ impl FlUrlInner {
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_private_key<'s>(
+    pub fn set_ssh_private_key(
         mut self,
         private_key: String,
         passphrase: Option<String>,
@@ -282,7 +293,7 @@ impl FlUrlInner {
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_user_password<'s>(mut self, password: String) -> Self {
+    pub fn set_ssh_user_password(mut self, password: String) -> Self {
         let Some(ssh_credentials) = self.ssh_credentials.take() else {
             return self;
         };
@@ -474,7 +485,7 @@ impl FlUrlInner {
     /// The framing comes from the stream itself — the `content_length` given to
     /// `HttpBodyAsStream::create` becomes `Content-Length`, and `None` goes out
     /// chunked. Everything else that applies to a streamed body applies here too
-    /// (see [`Self::execute_streamed`]): no `compress()`, no retries, the timeout
+    /// (see [`Self::execute_streamed`]): no `compress()`, no `encrypted()`, no retries, the timeout
     /// covers the whole upload.
     async fn execute_model_stream(
         self,
@@ -721,6 +732,32 @@ impl FlUrlInner {
         crate::compression::gzip(&body, level)
     }
 
+    /// The body as it goes on the wire: gzipped if `compress` asked for it, then
+    /// encrypted if `encrypted` did, with `Content-Encoding` listing the codings in
+    /// the order they were applied (`gzip, aes128gcm`). Encrypted data does not
+    /// compress, so the order is never the other way round.
+    ///
+    /// An empty body stays empty, with no `Content-Encoding`: a GET has nothing to
+    /// encrypt, and an encrypted empty body would make it a request with a body.
+    fn encode_body(&mut self, mut body: Vec<u8>) -> Result<Vec<u8>, FlUrlError> {
+        if let Some(level) = self.compress_body {
+            body = self.compress_body(body, level)?;
+        }
+
+        #[cfg(feature = "encryption")]
+        if let Some(key) = self.encryption_key.as_ref() {
+            if !body.is_empty() {
+                body = key.encrypt(&body);
+                self.headers.append_to_list_header(
+                    "Content-Encoding",
+                    my_http_utils::AES128GCM_CONTENT_ENCODING,
+                );
+            }
+        }
+
+        Ok(body)
+    }
+
     fn get_path_and_query_with_leading_slash(&self) -> String {
         let mut path_and_query = self.url_builder.get_path_and_query();
         // A URL with a query but no path yields "?a=b"; the request target must
@@ -773,9 +810,7 @@ impl FlUrlInner {
             self.compile_debug_info_with_body(debug, method.as_str(), &body);
         }
 
-        if let Some(level) = self.compress_body {
-            body = self.compress_body(body, level)?;
-        }
+        body = self.encode_body(body)?;
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
 
@@ -825,22 +860,18 @@ impl FlUrlInner {
             result = result.header(key, value);
         }
 
-        if !self.headers.has_host_header() {
-            if !self.mode.is_h2() {
-                result = result.header(
-                    hyper::header::HOST.as_str(),
-                    self.url_builder.get_host_port(),
-                );
-            }
+        if !self.headers.has_host_header() && !self.mode.is_h2() {
+            result = result.header(
+                hyper::header::HOST.as_str(),
+                self.url_builder.get_host_port(),
+            );
         }
 
         if self.url_builder.is_unix_socket() {
             result = result.header(hyper::header::ACCEPT, "*/*");
         } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
-                }
+            if !self.headers.has_connection_header && !self.do_not_reuse_connection {
+                result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
             }
         }
 
@@ -878,9 +909,7 @@ impl FlUrlInner {
             self.compile_debug_info_with_body(debug, method.as_str(), &body);
         }
 
-        if let Some(level) = self.compress_body {
-            body = self.compress_body(body, level)?;
-        }
+        body = self.encode_body(body)?;
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
 
@@ -916,10 +945,8 @@ impl FlUrlInner {
         if self.url_builder.is_unix_socket() {
             builder = builder.append_header("Accept", "*/*");
         } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    builder = builder.append_header("Connection", "keep-alive");
-                }
+            if !self.headers.has_connection_header && !self.do_not_reuse_connection {
+                builder = builder.append_header("Connection", "keep-alive");
             }
         }
 
@@ -1102,6 +1129,11 @@ impl FlUrlInner {
             return Err(FlUrlError::StreamedBodyCanNotBeCompressed);
         }
 
+        #[cfg(feature = "encryption")]
+        if self.encryption_key.is_some() {
+            return Err(FlUrlError::StreamedBodyCanNotBeEncrypted);
+        }
+
         self.mode = FlUrlMode::Http1Hyper;
 
         if let Some(debug) = debug {
@@ -1118,7 +1150,7 @@ impl FlUrlInner {
     /// the trait object the connection carries. Mirrors the header work of
     /// `compile_hyper_request`, minus everything that needs the body in hand:
     /// no `Content-Type` derived from the payload (a stream carries none — set it with
-    /// [`Self::with_header`]), no debug dump of the body, no compression.
+    /// [`Self::with_header`]), no debug dump of the body, no compression, no encryption.
     fn compile_streamed_request<TBody>(
         &mut self,
         method: Method,
@@ -1152,10 +1184,8 @@ impl FlUrlInner {
         if self.url_builder.is_unix_socket() {
             result = result.header(hyper::header::ACCEPT, "*/*");
         } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
-                }
+            if !self.headers.has_connection_header && !self.do_not_reuse_connection {
+                result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
             }
         }
 
@@ -1258,15 +1288,26 @@ impl FlUrlInner {
         method: &str,
         body: &[u8],
     ) {
-        request_debug_string.push_str("[");
+        request_debug_string.push('[');
         request_debug_string.push_str(method);
         request_debug_string.push_str("] ");
 
         self.compile_debug_info(request_debug_string);
 
-        if body.len() == 0 {
+        if body.is_empty() {
             return;
         }
+
+        // A body is encrypted because it carries secrets, and a debug string ends up
+        // in a log more often than not: it gets the length, not the text.
+        #[cfg(feature = "encryption")]
+        if self.encryption_key.is_some() {
+            request_debug_string.push_str("Body: ");
+            request_debug_string.push_str(body.len().to_string().as_str());
+            request_debug_string.push_str(" bytes, sent encrypted");
+            return;
+        }
+
         match std::str::from_utf8(body) {
             Ok(body_as_str) => {
                 request_debug_string.push_str("Body: ");
@@ -1284,14 +1325,15 @@ impl FlUrlInner {
     /// streamed payload exists only as it is written to the socket, so printing it
     /// would mean buffering the very thing streaming avoids.
     fn compile_debug_info_streamed(&self, request_debug_string: &mut String, method: &str) {
-        request_debug_string.push_str("[");
+        request_debug_string.push('[');
         request_debug_string.push_str(method);
         request_debug_string.push_str("] ");
 
         self.compile_debug_info(request_debug_string);
     }
 
-    pub fn to_string(&self) -> String {
+    /// The path and query and the headers: what `Display` of `FlUrl` shows.
+    pub fn describe(&self) -> String {
         let mut result = String::new();
         self.compile_debug_info(&mut result);
 
@@ -1732,7 +1774,7 @@ mod test {
             let request_body = match body {
                 Some(body) => HttpRequestBody::from_raw_data(
                     body.as_bytes().to_vec(),
-                    Some("application/json".into()),
+                    Some("application/json"),
                 ),
                 None => HttpRequestBody::Empty,
             };

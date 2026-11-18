@@ -54,7 +54,7 @@ pub trait IntoFlUrl {
 }
 
 #[async_trait::async_trait]
-impl<'g> IntoFlUrl for &'g str {
+impl IntoFlUrl for &str {
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl::new(self).append_path_segment(path_segment)
     }
@@ -144,7 +144,7 @@ impl<'g> IntoFlUrl for &'g str {
 }
 
 #[async_trait::async_trait]
-impl<'g> IntoFlUrl for &'g String {
+impl IntoFlUrl for &String {
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl::new(self).append_path_segment(path_segment)
     }

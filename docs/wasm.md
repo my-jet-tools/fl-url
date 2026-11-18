@@ -65,7 +65,8 @@ head and the body is bounded by `set_response_body_timeout` alone — see
 Native-only surface that is **not available** under wasm (browsers can't express
 it): `with_client_certificate` (native + a TLS provider feature), all `*_ssh_*` methods, unix-socket URLs,
 `into_hyper_response`, the
-`*_request_streamed` / `execute_streamed` methods and `get_resolved_ip`.
+`*_request_streamed` / `execute_streamed` methods, `get_resolved_ip`, and
+[`encrypted`](encryption.md) (the `encryption` feature does not build for `wasm32`).
 
 Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
 them with `wasm_bindgen_futures::spawn_local` / your framework's async context

@@ -57,6 +57,10 @@ Under wasm it is one line:
 The dump is written **before** compression, so `compress()` does not turn it into
 gzip noise — what you read is what you sent.
 
+A body sent with [`encrypted(&key)`](encryption.md) is the other way round: it is
+encrypted because it carries secrets, and a debug string ends up in a log more often
+than not, so the dump gets `Body: <n> bytes, sent encrypted` instead of the text.
+
 The streamed variants are the one exception to "the body is in the dump": a streamed
 payload exists only as it is written to the socket, so printing it would mean
 buffering the very thing streaming avoids. Their dump is the request head alone.

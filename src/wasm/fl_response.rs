@@ -108,21 +108,17 @@ impl FlUrlResponse {
         false
     }
 
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
+}
 
-        result.push_str("StatusCode: ");
-        result.push_str(self.status_code.to_string().as_str());
-        result.push_str("; ");
-        result.push_str("Headers: ");
+/// The status code and the headers: `StatusCode: 200; Headers: name='value';...`.
+impl std::fmt::Display for FlUrlResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StatusCode: {}; Headers: ", self.status_code)?;
 
         for (name, value) in &self.headers {
-            result.push_str(name);
-            result.push_str("='");
-            result.push_str(value);
-            result.push_str("';");
+            write!(f, "{}='{}';", name, value)?;
         }
 
-        result
+        Ok(())
     }
 }

@@ -47,6 +47,14 @@ dangerous-tls = ["_tls", "my-tls/dangerous-tls"]
 # called or not. Under wasm `.compress()` without it is a compile error.
 with-wasm-compression = ["dep:flate2"]
 
+# Native only: compiles `.encrypted(&key)`, which sends a request body encrypted with
+# `Content-Encoding: aes128gcm` (RFC 8188), the format of my-reverse-proxy's encrypted
+# calls. The key and the cipher come from my-http-utils (`HttpBodyEncryptionKey`), which
+# my-http-server uses too, so both ends encrypt the same way. All of it is pure Rust.
+# The feature does not build for wasm: my-http-utils takes the salt of every body from
+# getrandom, which has no browser backend unless the application turns one on.
+encryption = ["my-http-utils/encryption"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -63,8 +71,6 @@ my-http-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-http-ut
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 async-trait = "*"
-# A piece of a response body, as `FlUrlBodyReader::get_next` gives it on both backends.
-bytes = "*"
 
 # Native backend (`non_wasm`): hyper / tokio / TLS / connection pooling / ssh.
 # None of these compile to wasm, so they are excluded from the wasm build.
@@ -86,7 +92,9 @@ tokio = { version = "*", features = [
 hyper-util = { version = "*", features = ["tokio"] }
 http-body-util = { version = "*" }
 my-http-client = { tag = "0.1.0", git = "https://github.com/my-jet-tools/my-http-client.git" }
-my-hyper-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-hyper-utils.git" }
+# The data of a hyper body frame: what a request body is made of and what a response
+# body is read in. The wasm backend reads the browser's body into a `Vec<u8>` instead.
+bytes = "*"
 my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git", optional = true }
 http = "*"
 parking_lot = "*"

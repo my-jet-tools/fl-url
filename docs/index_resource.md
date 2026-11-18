@@ -4,7 +4,7 @@ A fluent, async HTTP client library for Rust, inspired by the .NET Flurl library
 
 FLUrl is a Hyper-based HTTP client that provides a fluent API for building and executing HTTP requests with connection pooling, retry logic, and comprehensive body type support.
 
-This page is everything an ordinary request needs: installation, building and sending requests, bodies, responses and errors. The rest — WASM, streamed bodies, request models, connections, TLS, SSH, unix sockets, retries, timeouts and limits, compression, debugging — are topics, listed at the end. Read a topic: `resource://flurl-usage-guide/{topic}`, or `get_flurl_usage_guide` with `topic`.
+This page is everything an ordinary request needs: installation, building and sending requests, bodies, responses and errors. The rest — WASM, streamed bodies, request models, connections, TLS, SSH, unix sockets, retries, timeouts and limits, compression, encryption, debugging — are topics, listed at the end. Read a topic: `resource://flurl-usage-guide/{topic}`, or `get_flurl_usage_guide` with `topic`.
 
 ## Features
 
@@ -18,6 +18,7 @@ This page is everything an ordinary request needs: installation, building and se
 - **Known IP, no DNS**: `https://domain.com@15.0.0.5/path` connects to the ip while the Host header and TLS SNI stay `domain.com` (native only) — see [Connecting to a Known IP](known-ip.md)
 - **Retry Logic**: `with_retries(n)` replays a request that got no response; `with_retry(delay, n)` also replays a 5xx, `delay` apart, to ride out a restart of the service — see [Retry Logic](retries.md)
 - **Request Compression**: `compress()` gzips a request body of 64 bytes and up; `compress_with_level(CompressionLevel::Fast | Default | Best)` picks how hard. Under wasm both come with the `with-wasm-compression` feature — see [Compression](compression.md#request-compression-under-wasm)
+- **Encrypted Request Body**: `encrypted(&key)` sends the body as `Content-Encoding: aes128gcm` (RFC 8188), the format of my-reverse-proxy's encrypted calls, with the key type from my-http-utils (`encryption` feature, native only) — see [Encrypted Request Body](encryption.md)
 - **Response Body Reader**: `get_body()` gives the body as a reader — read it piece by piece, or as a whole within a size limit, as bytes, a string or JSON — native and wasm
 - **Passing a Response On**: `into_hyper_response()` hands the response on with its body still streaming (native only)
 - **Streaming Request Bodies**: Send a body of any size at constant memory, framed with `Content-Length` or chunked (native only) — see [Streamed Body](streamed-body.md)
@@ -84,6 +85,7 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", featu
 | `dangerous-tls` | off | A modifier, not a TLS switch: it makes [`accept_invalid_certificate()`](tls.md#accept-invalid-certificates) actually skip server-cert verification. Combine it with a provider feature — on its own the TLS code compiles but no provider is installed, so https fails at connect time. |
 | `with-ssh` | off | [SSH tunneling](ssh.md) (`ssh://…->http://…`, `ssh://…->https://…` and `ssh://…->/path/to.sock` urls). Unix only. Built on `my-ssh`, which is `russh` underneath — no `libssh2` or OpenSSL, but this is the one feature that links `aws-lc-sys` (a bundled C build). |
 | `with-wasm-compression` | off | wasm only: compiles [`compress()` and `compress_with_level()`](compression.md#request-compression-under-wasm) and flate2 into the bundle; without it a call under wasm is a compile error. Whether a body is compressed is decided at run time, so the linker can not drop the gzip code, and a client that never compresses would pay for it: 20 KB over the wire, measured on a trading terminal. The native backend always has both and does not depend on it. |
+| `encryption` | off | Native only: [`encrypted(&key)`](encryption.md), which encrypts the request body as `Content-Encoding: aes128gcm` (RFC 8188) with my-http-utils' `HttpBodyEncryptionKey`. Pure Rust. Does not build for `wasm32`. |
 
 On `wasm32` TLS is the browser's job, so neither provider feature matters there —
 the `fetch` backend handles `https://` with or without them.
@@ -692,4 +694,5 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
 | [`timeouts-and-limits`](timeouts-and-limits.md) | `set_timeout`, `set_response_body_timeout`, what each of them bounds, and how a response body is held to a size limit |
 | [`retries`](retries.md) | `with_retries(n)` vs `with_retry(delay, n)`: which outcomes are replayed, idempotent methods only, what the last attempt returns, how long it can take |
 | [`compression`](compression.md) | `compress()` / `compress_with_level()` of a request body, `with-wasm-compression` for them under wasm, and `accept_gzip()` for the response |
+| [`encryption`](encryption.md) | `encrypted(&key)` (the `encryption` feature, native only): the request body as `Content-Encoding: aes128gcm`, the key from base64, together with `compress()`, reading an encrypted answer, what does not apply |
 | [`debugging`](debugging.md) | `print_input_request()` and the `*_with_debug` twin of every request method |

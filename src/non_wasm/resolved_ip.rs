@@ -33,7 +33,7 @@ pub(crate) fn extract_resolved_ip(url: &str) -> Result<(Cow<'_, str>, Option<IpA
     let rest = &url[authority_start..];
     // '@' further on belongs to the path or the query, not to the authority.
     let authority_len = rest
-        .find(|c| matches!(c, '/' | '?' | '#'))
+        .find(['/', '?', '#'])
         .unwrap_or(rest.len());
     let authority = &rest[..authority_len];
 

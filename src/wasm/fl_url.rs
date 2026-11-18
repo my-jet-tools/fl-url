@@ -13,22 +13,17 @@ use crate::FlUrlError;
 
 /// Kept for API parity with the native backend. Under wasm the browser negotiates
 /// the HTTP version, so the mode is stored but otherwise ignored.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum FlUrlMode {
     H2,
     Http1NoHyper,
+    #[default]
     Http1Hyper,
 }
 
 impl FlUrlMode {
     pub fn is_h2(&self) -> bool {
         matches!(self, Self::H2)
-    }
-}
-
-impl Default for FlUrlMode {
-    fn default() -> Self {
-        Self::Http1Hyper
     }
 }
 
@@ -349,13 +344,15 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         self.inner?.delete_with_debug(request_debug_string).await
     }
+}
 
-    /// The path and query and the headers of the request as they stand — or, once
-    /// the builder has met an error, that error.
-    pub fn to_string(&self) -> String {
+/// The path and query and the headers of the request as they stand — or, once the
+/// builder has met an error, that error.
+impl std::fmt::Display for FlUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.inner.as_ref() {
-            Ok(inner) => inner.to_string(),
-            Err(err) => format!("Error: {}", err),
+            Ok(inner) => f.write_str(&inner.describe()),
+            Err(err) => write!(f, "Error: {}", err),
         }
     }
 }

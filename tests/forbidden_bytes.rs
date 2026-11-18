@@ -77,8 +77,7 @@ async fn the_own_http1_mode_names_the_url_and_the_byte() {
         .update_mode(FlUrlMode::Http1NoHyper)
         .get()
         .await
-        .err()
-        .expect("the request must be refused");
+        .expect_err("the request must be refused");
 
     match err {
         FlUrlError::InvalidUrl(message) => assert_eq!(
@@ -92,8 +91,7 @@ async fn the_own_http1_mode_names_the_url_and_the_byte() {
         .update_mode(FlUrlMode::Http1NoHyper)
         .get()
         .await
-        .err()
-        .expect("the request must be refused");
+        .expect_err("the request must be refused");
 
     match err {
         FlUrlError::InvalidUrl(message) => assert_eq!(
@@ -112,8 +110,7 @@ async fn a_header_value_with_a_new_line_fails_the_request() {
             .with_header("Authorization", "Bearer token123\n")
             .get()
             .await
-            .err()
-            .expect("the request must be refused");
+            .expect_err("the request must be refused");
 
         match err {
             FlUrlError::RequestBuild(message) => assert_eq!(
@@ -135,8 +132,7 @@ async fn an_invalid_header_name_fails_the_request() {
                 .with_header(name, "value")
                 .get()
                 .await
-                .err()
-                .expect("the request must be refused");
+                .expect_err("the request must be refused");
 
             assert!(
                 matches!(err, FlUrlError::RequestBuild(_)),
@@ -154,8 +150,7 @@ async fn a_request_with_a_body_checks_its_headers_too() {
             .with_header("X-Api-Key", "secret\r\n")
             .post(flurl::body::HttpRequestBody::as_json(&["payload"]))
             .await
-            .err()
-            .expect("the request must be refused");
+            .expect_err("the request must be refused");
 
         assert!(
             matches!(err, FlUrlError::RequestBuild(_)),
@@ -172,8 +167,7 @@ async fn a_streamed_request_checks_its_headers_too() {
         .with_header("X-Api-Key", "secret\n")
         .post_request_streamed(body, None)
         .await
-        .err()
-        .expect("the request must be refused");
+        .expect_err("the request must be refused");
 
     assert!(matches!(err, FlUrlError::RequestBuild(_)), "{err:?}");
 }
@@ -197,8 +191,7 @@ async fn a_model_header_with_a_new_line_fails_the_request() {
                 },
             )
             .await
-            .err()
-            .expect("the request must be refused");
+            .expect_err("the request must be refused");
 
         assert!(
             matches!(err, FlUrlError::RequestBuild(_)),

@@ -389,6 +389,12 @@ impl FlUrlHttpConnectionsCache {
     }
 }
 
+impl Default for FlUrlHttpConnectionsCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Pool contract: HTTP/1 connections are checked out EXCLUSIVELY — the item is
 /// removed from the pool for the duration of the request (and of the response
 /// body) and comes back via `put_connection_back` only when it is safe to reuse.

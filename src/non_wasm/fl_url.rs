@@ -16,25 +16,17 @@ use crate::CompressionLevel;
 use crate::FlUrlError;
 use crate::FlUrlHttpConnectionsCache;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum FlUrlMode {
     H2,
     Http1NoHyper,
+    #[default]
     Http1Hyper,
 }
 
 impl FlUrlMode {
     pub fn is_h2(&self) -> bool {
-        match self {
-            Self::H2 => true,
-            _ => false,
-        }
-    }
-}
-
-impl Default for FlUrlMode {
-    fn default() -> Self {
-        Self::Http1Hyper
+        matches!(self, Self::H2)
     }
 }
 
@@ -144,6 +136,47 @@ impl FlUrl {
         self.map(|inner| inner.compress_with_level(level))
     }
 
+    /// Encrypts the request body with `key` and sends it with
+    /// `Content-Encoding: aes128gcm` (RFC 8188). This is the format of
+    /// my-reverse-proxy's encrypted calls, and the one my-http-server decrypts.
+    ///
+    /// * A fresh random salt goes into every body, so the same body never looks the
+    ///   same twice. A retry resends the bytes already built: it does not encrypt
+    ///   again.
+    /// * With [`Self::compress`] the body is gzipped first, then encrypted, and goes
+    ///   out with `Content-Encoding: gzip, aes128gcm`. A `Content-Encoding` the caller
+    ///   set gets `aes128gcm` added at the end of the same line.
+    /// * An empty body (a GET, a DELETE) is sent as it is: there is nothing to
+    ///   encrypt.
+    /// * The `*_with_debug` dump gets the length of the body, not its text.
+    /// * A streamed body is refused with `FlUrlError::StreamedBodyCanNotBeEncrypted`.
+    /// * The response is not decrypted. An encrypted answer comes with
+    ///   `Content-Encoding: aes128gcm`, and the caller opens it with
+    ///   [`HttpBodyEncryptionKey::decrypt`](my_http_utils::HttpBodyEncryptionKey::decrypt).
+    ///
+    /// The plain text is whatever the server expects. my-reverse-proxy, for one, wants a
+    /// JSON with `ts`, the sender's clock in unix seconds, and that is the caller's to
+    /// put in.
+    ///
+    /// ```no_run
+    /// # async fn doc(key_from_settings: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// use flurl::my_http_utils::HttpBodyEncryptionKey;
+    ///
+    /// let key = HttpBodyEncryptionKey::from_base64(key_from_settings)?;
+    ///
+    /// let response = flurl::FlUrl::new("http://127.0.0.1:8000")
+    ///     .append_path_segment("api")
+    ///     .encrypted(&key)
+    ///     .post_json(&serde_json::json!({ "ts": 1_700_000_000 }))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "encryption")]
+    pub fn encrypted(self, key: &my_http_utils::HttpBodyEncryptionKey) -> Self {
+        self.map(|inner| inner.encrypted(key))
+    }
+
     /// Advertises gzip support to the server (`Accept-Encoding: gzip`) and
     /// has the reader of the body (`get_body`) give a gzip-encoded response body
     /// decoded, whichever way it is read. `into_hyper_response` passes the body on as
@@ -251,7 +284,7 @@ impl FlUrl {
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_private_key<'s>(
+    pub fn set_ssh_private_key(
         self,
         private_key: String,
         passphrase: Option<String>,
@@ -260,7 +293,7 @@ impl FlUrl {
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_user_password<'s>(self, password: String) -> Self {
+    pub fn set_ssh_user_password(self, password: String) -> Self {
         self.map(|inner| inner.set_ssh_user_password(password))
     }
 
@@ -585,11 +618,13 @@ impl FlUrl {
     /// violation), and `None` removes it, because a body of unknown size must not
     /// claim a length it may not deliver.
     ///
-    /// Three builder knobs do not apply, and none of them fails quietly:
+    /// These builder knobs do not apply, and none of them fails quietly:
     ///
     /// * [`Self::compress`] and [`Self::compress_with_level`] gzip the body as one
     ///   buffer, which is exactly what streaming avoids →
     ///   [`FlUrlError::StreamedBodyCanNotBeCompressed`].
+    /// * `encrypted()` (the `encryption` feature) encrypts the body as one buffer too
+    ///   → `FlUrlError::StreamedBodyCanNotBeEncrypted`.
     /// * [`Self::with_retries`] and [`Self::with_retry`] are ignored: the payload is
     ///   consumed as it is sent, so the request is attempted exactly once. Rebuilding
     ///   the stream and calling again is the caller's decision — it owns the source
@@ -690,13 +725,15 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         self.inner?.delete_with_debug(request_debug_string).await
     }
+}
 
-    /// The path and query and the headers of the request as they stand — or, once
-    /// the builder has met an error, that error.
-    pub fn to_string(&self) -> String {
+/// The path and query and the headers of the request as they stand — or, once the
+/// builder has met an error, that error.
+impl std::fmt::Display for FlUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.inner.as_ref() {
-            Ok(inner) => inner.to_string(),
-            Err(err) => format!("Error: {}", err),
+            Ok(inner) => f.write_str(&inner.describe()),
+            Err(err) => write!(f, "Error: {}", err),
         }
     }
 }

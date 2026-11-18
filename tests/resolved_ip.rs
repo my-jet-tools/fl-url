@@ -98,8 +98,7 @@ async fn a_refused_connection_names_the_pinned_ip() {
     let err = FlUrl::new(format!("http://{}@127.0.0.1:{}/api", SERVER_NAME, port))
         .get()
         .await
-        .err()
-        .expect("nothing listens on the port");
+        .expect_err("nothing listens on the port");
 
     let err = format!("{:?}", err);
     assert!(
@@ -209,8 +208,7 @@ async fn https_connects_to_the_ip_and_uses_the_server_name_as_sni() {
         .do_not_reuse_connection()
         .get()
         .await
-        .err()
-        .expect("the server walks away mid-handshake");
+        .expect_err("the server walks away mid-handshake");
 
     assert_eq!(server.await.unwrap().as_deref(), Some(SERVER_NAME));
 

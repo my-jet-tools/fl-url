@@ -48,6 +48,10 @@ jobs:
       - name: Test with my-http-client websocket support
         run: cargo test --features my-http-client/with-websocket
 
+      # tests/request_encryption.rs and the header joining in fl_url_headers.rs.
+      - name: Test with encryption
+        run: cargo test --features encryption
+
   build-windows:
 
     runs-on: windows-latest

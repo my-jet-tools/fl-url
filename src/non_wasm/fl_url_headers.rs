@@ -55,6 +55,55 @@ impl FlUrlHeaders {
         self.len += 1;
     }
 
+    /// Adds `value` to the list header `name` (`Content-Encoding`). The result is one
+    /// line: `name: <what was there>, <value>`, or a new header when there was none.
+    /// Two lines would mean the same thing to HTTP, but a server that reads only the
+    /// first line of a header would see half the list. Codings go in the order they
+    /// were applied, so a coding applied after the ones already listed goes last.
+    ///
+    /// The builder can only append, so when the header is already there the headers
+    /// are put together again, in the same order.
+    #[cfg(feature = "encryption")]
+    pub(crate) fn append_to_list_header(&mut self, name: &str, value: &str) {
+        if !self.has_header(name) {
+            self.add(name, value);
+            return;
+        }
+
+        let headers: Vec<(String, String)> = self
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+
+        // Every line of the header is joined into the first one, the new value after
+        // them all.
+        let mut combined = headers
+            .iter()
+            .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+            .map(|(_, header_value)| header_value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        combined.push_str(", ");
+        combined.push_str(value);
+
+        let invalid_header = self.invalid_header.take();
+        *self = Self::new();
+        self.invalid_header = invalid_header;
+
+        let mut combined = Some(combined);
+
+        for (header_name, header_value) in headers {
+            if !header_name.eq_ignore_ascii_case(name) {
+                self.add(&header_name, &header_value);
+                continue;
+            }
+
+            if let Some(combined) = combined.take() {
+                self.add(&header_name, &combined);
+            }
+        }
+    }
+
     /// Fails with the first header [`Self::add`] was given that can not be sent.
     /// Called right before the headers go into a request.
     pub(crate) fn ensure_valid(&self) -> Result<(), FlUrlError> {
@@ -83,12 +132,22 @@ impl FlUrlHeaders {
         self.len
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (&'s str, &'s str)> {
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.headers.iter()
     }
 
     pub fn get_builder(&self) -> &MyHttpClientHeadersBuilder {
         &self.headers
+    }
+}
+
+impl Default for FlUrlHeaders {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -184,5 +243,73 @@ mod tests {
         let reason = format!("{:?}", headers.ensure_valid().unwrap_err());
         assert!(reason.contains("'First'"), "{reason}");
         assert_eq!(headers.len(), 1);
+    }
+
+    #[cfg(feature = "encryption")]
+    fn lines(headers: &FlUrlHeaders) -> Vec<(String, String)> {
+        headers
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn a_list_header_that_is_not_there_is_added() {
+        let mut headers = FlUrlHeaders::new();
+        headers.add("X-Api-Key", "key");
+        headers.append_to_list_header("Content-Encoding", "aes128gcm");
+
+        assert_eq!(
+            lines(&headers),
+            [
+                ("X-Api-Key".to_string(), "key".to_string()),
+                ("Content-Encoding".to_string(), "aes128gcm".to_string()),
+            ]
+        );
+    }
+
+    /// The value goes last, on the line that was there, and every other header keeps
+    /// its place and what it marks (the Host header, the Connection header).
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn a_list_header_that_is_there_gets_the_value_on_the_same_line() {
+        let mut headers = FlUrlHeaders::new();
+        headers.add("Host", "example.com");
+        headers.add("content-encoding", "br");
+        headers.add("Connection", "close");
+        headers.add("Content-Encoding", "gzip");
+        headers.append_to_list_header("Content-Encoding", "aes128gcm");
+
+        assert_eq!(
+            lines(&headers),
+            [
+                ("Host".to_string(), "example.com".to_string()),
+                (
+                    "content-encoding".to_string(),
+                    "br, gzip, aes128gcm".to_string()
+                ),
+                ("Connection".to_string(), "close".to_string()),
+            ]
+        );
+        assert_eq!(headers.len(), 3);
+        assert_eq!(headers.get_host_header_value(), Some("example.com"));
+        assert!(headers.has_connection_header);
+    }
+
+    /// A header that could not be added still fails the request after the headers are
+    /// put together again.
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn a_refused_header_is_still_reported_after_the_list_header_is_joined() {
+        let mut headers = FlUrlHeaders::new();
+        headers.add("Content-Encoding", "gzip");
+        headers.add("Authorization", "Bearer secret\n");
+        headers.append_to_list_header("Content-Encoding", "aes128gcm");
+
+        assert!(matches!(
+            headers.ensure_valid(),
+            Err(FlUrlError::RequestBuild(_))
+        ));
     }
 }
